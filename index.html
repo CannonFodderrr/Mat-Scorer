@@ -325,7 +325,58 @@
     .score-pill.our .lab { color: #6ddea0; }
     .score-pill.opp .lab { color: #ff8f7a; }
     .score-pill.our { width: 75%; justify-self: start; }
-    
+    .score-pill {
+      flex-direction: row; align-items: center; gap: 6px; padding: 4px 6px;
+    }
+    .score-pill .score-pill-main { flex: 1; min-width: 0; text-align: center; display: flex; flex-direction: column; justify-content: center; }
+    .score-pill.our { flex-direction: row; }
+    .score-pill.opp { flex-direction: row-reverse; }
+    .inj-choice-btn {
+      flex: 0 0 auto;
+      max-width: 52px;
+      min-height: 36px;
+      padding: 4px 5px;
+      border-radius: 7px;
+      border: 1px solid rgba(217,164,65,0.55);
+      background: rgba(74,59,29,0.85);
+      color: var(--gold);
+      font-size: 9px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+      line-height: 1.15;
+      cursor: pointer;
+      white-space: normal;
+    }
+    .inj-choice-btn:active { opacity: 0.85; transform: scale(0.97); }
+    .score-pill.our .inj-choice-btn { border-color: rgba(47,122,79,0.65); background: rgba(30,59,44,0.88); color: #b8e0c8; }
+    .score-pill.opp .inj-choice-btn { border-color: rgba(194,59,34,0.65); background: rgba(74,36,28,0.88); color: #f0b4a8; }
+
+    .utb-modal {
+      display: none; position: absolute; inset: 0; z-index: 20;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55);
+      pointer-events: auto;
+    }
+    .utb-modal.visible { display: flex; }
+    .utb-card {
+      max-width: min(92vw, 340px); width: 100%;
+      padding: 18px 16px; border-radius: 14px;
+      background: rgba(20,24,22,0.96);
+      border: 2px solid var(--gold);
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+    }
+    .utb-card .utb-title {
+      font-size: 14px; font-weight: 900; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--gold); margin-bottom: 8px;
+    }
+    .utb-card .utb-body {
+      font-size: 13px; color: var(--chalk); line-height: 1.4; margin-bottom: 14px; opacity: 0.92;
+    }
+    .utb-card .utb-actions { display: flex; flex-direction: column; gap: 8px; }
+    .utb-card .utb-actions .btn { margin-top: 0; }
+
     .score-center-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 0 auto; }
     .score-right-col { width: 75%; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
     .score-right-col .score-pill { width: 100%; }
@@ -363,6 +414,37 @@
 
     .live-footer-fixed { display: flex; flex-direction: column; gap: 2px; width: 100%; margin-top: 2px; flex-shrink: 0; }
     .last-action-text { font-size: 11px; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px; text-align: center; margin-top: 4px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+
+    .live-start-overlay {
+      position: absolute; inset: 0; z-index: 5;
+      display: none; align-items: center; justify-content: center;
+      pointer-events: none;
+      background: rgba(0,0,0,0.35);
+    }
+    .live-start-overlay.visible { display: flex; }
+    .live-start-card {
+      pointer-events: auto;
+      max-width: min(92vw, 360px);
+      padding: 18px 22px;
+      border-radius: 14px;
+      background: rgba(20,24,22,0.92);
+      border: 2px solid var(--gold);
+      text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .live-start-card .start-title {
+      font-size: 15px; font-weight: 900; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--gold); margin-bottom: 8px;
+    }
+    .live-start-card .start-body {
+      font-size: 13px; color: var(--chalk); line-height: 1.4; opacity: 0.92;
+    }
+    .live-start-card .start-rec-hint {
+      margin-top: 12px; font-size: 12px; font-weight: 800;
+      color: #ff6b5a; text-transform: uppercase; letter-spacing: 0.5px;
+    }
 
     .toast { position: fixed; left: 50%; bottom: calc(24px + var(--safeBottom)); transform: translateX(-50%); background: var(--gold); color: var(--mat); font-weight: 800; font-size: 12px; padding: 10px 16px; border-radius: 99px; z-index: 50; display: none; white-space: nowrap; max-width: 90vw; }
     .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--panelLine); font-size: 13px; }
@@ -547,11 +629,21 @@
     <div class="video-wrap">
       <video id="live-video" playsinline webkit-playsinline muted autoplay></video>
     </div>
+    <div class="live-start-overlay" id="live-start-overlay">
+      <div class="live-start-card">
+        <div class="start-title">Ready</div>
+        <div class="start-body">Camera is on. Press the <strong>REC</strong> button to start the match clock and recording.</div>
+        <div class="start-rec-hint">● Tap REC to begin</div>
+      </div>
+    </div>
     <div class="live-overlay">
       <div class="score-strip">
         <div class="score-pill our">
-          <div class="lab" id="live-our-name">Us</div>
-          <div class="num" id="live-our-pts">0</div>
+          <div class="score-pill-main">
+            <div class="lab" id="live-our-name">Us</div>
+            <div class="num" id="live-our-pts">0</div>
+          </div>
+          <button type="button" class="inj-choice-btn" id="inj-choice-our" onclick="openInjChoice('our')" title="Injury choice — our wrestler">Inj Choice</button>
         </div>
         <div class="score-center-col">
           <button type="button" class="live-chip period" id="period-btn" onclick="cyclePeriod()">P1</button>
@@ -559,10 +651,24 @@
         </div>
         <div class="score-right-col">
           <div class="score-pill opp">
-            <div class="lab" id="live-opp-name">Opp</div>
-            <div class="num" id="live-opp-pts">0</div>
+            <div class="score-pill-main">
+              <div class="lab" id="live-opp-name">Opp</div>
+              <div class="num" id="live-opp-pts">0</div>
+            </div>
+            <button type="button" class="inj-choice-btn" id="inj-choice-opp" onclick="openInjChoice('opp')" title="Injury choice — opponent">Inj Choice</button>
           </div>
           <button type="button" class="live-chip end-btn" onclick="endLiveMatch()">End Match</button>
+        </div>
+      </div>
+      <div class="utb-modal" id="utb-modal">
+        <div class="utb-card">
+          <div class="utb-title">Ultimate Tie Breaker</div>
+          <div class="utb-body" id="utb-body">Match is tied. Who won the Ultimate Tie Breaker?</div>
+          <div class="utb-actions">
+            <button type="button" class="btn btn-green" id="utb-our-btn" onclick="resolveUtbWinner('our')">Our wrestler (+1)</button>
+            <button type="button" class="btn btn-red" id="utb-opp-btn" onclick="resolveUtbWinner('opp')">Opponent (+1)</button>
+            <button type="button" class="btn btn-ghost" onclick="cancelUtbWinner()">Cancel</button>
+          </div>
         </div>
       </div>
       <div class="live-spacer"></div>
@@ -655,7 +761,7 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const MAT_SIDE_BUILD = "2026-09-22-sw-v24";
+    const MAT_SIDE_BUILD = "2026-09-26-sw-v27";
     const STORE_KEY = "sw-matside-v1";
     
     const SCOPES = 'https://www.googleapis.com/auth/drive.file';
@@ -680,6 +786,8 @@
     let pausedAccumMs = 0;
     let pauseStartedAt = 0;
     let recTimer = null;
+    let matchStartedAt = 0;
+    let matchAwaitingStart = false; // camera on; wait for REC to begin recording/scoring
     
     let live = {
       boutId: null, wrestlerId: null, wrestlerName: "", opponent: "",
@@ -794,6 +902,8 @@
       try {
         if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
       } catch (e) {}
+      matchAwaitingStart = false;
+      setStartOverlayVisible(false);
       navStack = ["home"];
       showScreen("screen-home");
     }
@@ -1355,7 +1465,8 @@
         category: "Penalty/DQ",
         move: "Forfeit",
         direction: dir,
-        outcome: "success",
+        // Our forfeit = fail (red in SW); opp forfeit = success (green)
+        outcome: (kind === "our") ? "fail" : "success",
         points: 0,
         timestamp: "00:00",
         detail: detail,
@@ -1463,12 +1574,16 @@
         liveVid.muted = true; liveVid.playsInline = true; liveVid.srcObject = stream;
         try { await liveVid.play(); } catch (playErr) { try { await liveVid.play(); } catch (e2) {} }
 
-        recordedChunks = []; const mime = pickMimeType(); const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: 2500000 } : { videoBitsPerSecond: 2500000 };
+        // Prepare recorder but do NOT start until user taps REC
+        recordedChunks = [];
+        const mime = pickMimeType();
+        const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: 2500000 } : { videoBitsPerSecond: 2500000 };
         try { mediaRecorder = new MediaRecorder(stream, recOpts); } catch (e) { mediaRecorder = new MediaRecorder(stream); }
         mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) recordedChunks.push(ev.data); };
-        mediaRecorder.start(1000);
-        recording = true; recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0; recordStartedAt = Date.now(); matchStartedAt = Date.now();
+        recording = false; recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0;
+        recordStartedAt = 0; matchStartedAt = 0; matchAwaitingStart = true;
         startRecClock();
+        setStartOverlayVisible(true);
 
         // Fullscreen after stream is live (more reliable on iOS/Android)
         await enterLiveFullscreen();
@@ -1484,7 +1599,11 @@
         }, 400);
       } catch (err) {
         if (!confirm("Could not start camera/recording.\n\nScore without video?")) { showScreen("screen-event"); return; }
-        recording = false; recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0; recordStartedAt = Date.now(); matchStartedAt = Date.now(); startRecClock();
+        recording = false; recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0;
+        recordStartedAt = 0; matchStartedAt = 0; matchAwaitingStart = true;
+        mediaRecorder = null; recordedChunks = [];
+        startRecClock();
+        setStartOverlayVisible(true);
         showScreen("screen-live");
         fitLiveViewport();
       }
@@ -1492,7 +1611,45 @@
       document.getElementById("live-our-name").textContent = shortName(live.wrestlerName, "Us"); document.getElementById("live-opp-name").textContent = shortName(live.opponent, "Opp");
       document.getElementById("live-our-label").textContent = live.wrestlerName || "Us"; document.getElementById("live-opp-label").textContent = live.opponent || "Opp";
       document.getElementById("live-our-pts").textContent = "0"; document.getElementById("live-opp-pts").textContent = "0";
-      setPeriod("P1"); renderOverlayControls(); toast("Live match started");
+      setPeriod("P1"); renderOverlayControls(); toast("Tap REC to start match");
+    }
+
+    function setStartOverlayVisible(on) {
+      const el = document.getElementById("live-start-overlay");
+      if (!el) return;
+      el.classList.toggle("visible", !!on);
+    }
+
+    function beginMatchRecording() {
+      if (!matchAwaitingStart && recording) return;
+      try {
+        if (mediaRecorder && mediaRecorder.state === "inactive") {
+          mediaRecorder.start(1000);
+          recording = true;
+        } else if (mediaStream && (!mediaRecorder || mediaRecorder.state === "inactive")) {
+          const mime = pickMimeType();
+          const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: 2500000 } : { videoBitsPerSecond: 2500000 };
+          try { mediaRecorder = new MediaRecorder(mediaStream, recOpts); } catch (e) { mediaRecorder = new MediaRecorder(mediaStream); }
+          mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) recordedChunks.push(ev.data); };
+          mediaRecorder.start(1000);
+          recording = true;
+        } else if (!mediaRecorder) {
+          recording = false;
+        }
+      } catch (e) {
+        console.warn(e);
+        recording = false;
+        toast("Recording failed — scoring only");
+      }
+      recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0;
+      recordStartedAt = Date.now();
+      matchStartedAt = Date.now();
+      matchAwaitingStart = false;
+      if (live) live._frozenRecSec = null;
+      setStartOverlayVisible(false);
+      startRecClock();
+      renderOverlayControls();
+      toast(recording ? "Recording started" : "Match clock started");
     }
 
     function formatMmSs(sec) { sec = Math.max(0, Math.floor(sec || 0)); const m = Math.floor(sec / 60); const s = sec % 60; return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0"); }
@@ -1500,7 +1657,11 @@
       clearInterval(recTimer);
       recTimer = setInterval(() => {
         const badge = document.getElementById("rec-badge"); if (!badge) return;
-        if (!recording) { badge.textContent = "SCORE " + formatMmSs(effectiveRecordSec()); badge.classList.remove("paused"); return; }
+        if (matchAwaitingStart) { badge.textContent = "● REC START"; badge.classList.remove("paused"); return; }
+        if (!recording) {
+          if (recPaused) { const sec = (live && live._frozenRecSec != null) ? live._frozenRecSec : effectiveRecordSec(); badge.textContent = "❚❚ PAUSED " + formatMmSs(sec); badge.classList.add("paused"); return; }
+          badge.textContent = "SCORE " + formatMmSs(effectiveRecordSec()); badge.classList.remove("paused"); return;
+        }
         if (recPaused) { const sec = (live && live._frozenRecSec != null) ? live._frozenRecSec : effectiveRecordSec(); badge.textContent = "❚❚ PAUSED " + formatMmSs(sec); badge.classList.add("paused"); return; }
         badge.textContent = "● REC " + formatMmSs(effectiveRecordSec()); badge.classList.remove("paused");
       }, 250);
@@ -1513,7 +1674,29 @@
     function videoTimestamp() { return formatMmSs(effectiveRecordSec()); }
 
     function toggleRecordingPause() {
-      if (!recording) return toast("Not recording");
+      if (matchAwaitingStart) {
+        beginMatchRecording();
+        return;
+      }
+      if (!recording) {
+        const badge = document.getElementById("rec-badge");
+        try {
+          if (!recPaused) {
+            const frozen = effectiveRecordSec();
+            recPaused = true; pauseStartedAt = Date.now();
+            if (live) live._frozenRecSec = frozen;
+            if (badge) { badge.textContent = "❚❚ PAUSED " + formatMmSs(frozen); badge.classList.add("paused"); }
+            toast("Clock paused");
+          } else {
+            if (pauseStartedAt) { pausedAccumMs += Date.now() - pauseStartedAt; pauseStartedAt = 0; }
+            recPaused = false;
+            if (live) live._frozenRecSec = null;
+            if (badge) { badge.textContent = "SCORE " + formatMmSs(effectiveRecordSec()); badge.classList.remove("paused"); }
+            toast("Clock resumed");
+          }
+        } catch (e) { toast("Error pausing"); }
+        return;
+      }
       const badge = document.getElementById("rec-badge");
       try {
         if (!recPaused) {
@@ -1529,7 +1712,7 @@
       } catch (e) { toast("Error pausing"); }
     }
 
-    const PERIODS = ["P1", "P2", "P3", "OT", "OT2", "OT3"];
+    const PERIODS = ["P1", "P2", "P3", "OT", "OT2", "OT3", "OT4"];
     function resetPositionState() { live.position = "neutral"; live.choicePhase = null; live.choiceFor = null; live.pendingChoice = null; live.lastChooser = null; live.penPhase = null; }
     function isInternationalStyle() { const s = (live && live.style) || "Folkstyle"; return s === "Freestyle" || s === "Greco-Roman"; }
 
@@ -1566,10 +1749,30 @@
       if (live.undoStack.length > 40) live.undoStack.shift();
     }
 
+    /** Drop a leftover "menu" memo so UNDO does not need an extra no-op tap after a real action */
+    function consumeTopMenuSnapshot() {
+      if (!live || !live.undoStack || !live.undoStack.length) return;
+      const top = live.undoStack[live.undoStack.length - 1];
+      if (top && top.kind === "menu") live.undoStack.pop();
+    }
+
+    /** Enter near-fall control state without logging a 0-pt event (SW-compatible log) */
+    function enterNearFall(direction) {
+      if (matchAwaitingStart) { toast("Tap REC to start match"); return; }
+      if (isMatchEnding()) { toast("Match ending — tap End Match"); return; }
+      pushUndoSnapshot("score");
+      live.position = direction === "offense" ? "nf_our" : "nf_opp";
+      const who = direction === "offense" ? (live.wrestlerName || "Us") : (live.opponent || "Opp");
+      setLiveNote("Near fall — " + who);
+      renderOverlayControls();
+    }
+
     function applyStallOrCaution(direction, kind) {
       // Progressive sequences aligned with Strategic Wrestler (NFHS folkstyle)
       // Stalling: 1=warn 0, 2=1, 3=1, 4=2+choice, 5=DQ
       // Caution: 1=warn 0, 2=warn 0, 3+=1 to opponent
+      pushUndoSnapshot("score");
+      consumeTopMenuSnapshot();
       const who = direction === "offense" ? "our" : "opp";
       const ts = videoTimestamp();
       if (kind === "stalling") {
@@ -1591,6 +1794,7 @@
         if (direction === "offense") live.oppP += points; else live.ourP += points;
         document.getElementById("live-our-pts").textContent = String(live.ourP);
         document.getElementById("live-opp-pts").textContent = String(live.oppP);
+        if (outcome === "success") outcome = swOutcome(direction, "Penalty/DQ", move);
         live.events.push({
           id: Math.random().toString(36).slice(2, 9), period: live.period, category: "Penalty/DQ",
           move: move, direction: direction, outcome: outcome, points: points, timestamp: ts,
@@ -1616,6 +1820,7 @@
         if (direction === "offense") live.oppP += points; else live.ourP += points;
         document.getElementById("live-our-pts").textContent = String(live.ourP);
         document.getElementById("live-opp-pts").textContent = String(live.oppP);
+        if (outcome === "success") outcome = swOutcome(direction, "Penalty/DQ", "Caution");
         live.events.push({
           id: Math.random().toString(36).slice(2, 9), period: live.period, category: "Penalty/DQ",
           move: "Caution", direction: direction, outcome: outcome, points: points, timestamp: ts,
@@ -1628,16 +1833,18 @@
     }
 
     function cyclePeriod() {
+      if (matchAwaitingStart) { toast("Tap REC to start match"); return; }
       if (isMatchEnding()) { toast("Match ending — tap End Match"); return; }
+      if (live.period === "OT4") {
+        toast("OT4 is Ultimate Tie Breaker — last period");
+        return;
+      }
       pushUndoSnapshot("period");
       const idx = PERIODS.indexOf(live.period);
       let next;
       if (idx < 0) next = "P1";
       else if (idx < PERIODS.length - 1) next = PERIODS[idx + 1];
-      else {
-        const n = parseInt(String(live.period).replace(/\D/g, "") || "3", 10) + 1;
-        next = "OT" + n;
-      }
+      else next = "OT4"; // never advance past UTB
       live.period = next;
       const btn = document.getElementById("period-btn");
       if (btn) btn.textContent = next;
@@ -1654,7 +1861,16 @@
         renderOverlayControls();
         return;
       }
-      // P2/P3: alternate from lastChooser when known; OT2+ always let user pick who has choice
+      if (next === "OT4") {
+        live.choicePhase = "pick_wrestler";
+        live.choiceFor = null;
+        live.deferredOnce = false;
+        setLiveNote("Period → OT4 Ultimate Tie Breaker · choose who has choice");
+        toast("OT4 — Ultimate Tie Breaker");
+        renderOverlayControls();
+        return;
+      }
+      // P2/P3: alternate from lastChooser when known; OT2/OT3 let user pick who has choice
       const isOtBeyond = /^OT\d+$/.test(next) && next !== "OT";
       if (!isOtBeyond && (live.lastChooser === "our" || live.lastChooser === "opp")) {
         const auto = live.lastChooser === "our" ? "opp" : "our";
@@ -1675,6 +1891,22 @@
     }
     function setPeriod(p) { live.period = p; const btn = document.getElementById("period-btn"); if (btn) btn.textContent = p; }
     function chooseWrestler(who) { pushUndoSnapshot("choice"); live.choiceFor = who; live.choicePhase = "pick_position"; live.deferredOnce = false; setLiveNote((who === "our" ? (live.wrestlerName || "Us") : (live.opponent || "Opp")) + " has choice"); renderOverlayControls(); }
+
+    function openInjChoice(who) {
+      if (matchAwaitingStart) { toast("Tap REC to start match"); return; }
+      if (isMatchEnding()) { toast("Match ending — tap End Match"); return; }
+      if (!who || (who !== "our" && who !== "opp")) return;
+      pushUndoSnapshot("choice");
+      live.endPhase = null;
+      live.penPhase = null;
+      live.choiceFor = who;
+      live.choicePhase = "pick_position";
+      live.deferredOnce = false;
+      const nm = who === "our" ? (live.wrestlerName || "Us") : (live.opponent || "Opp");
+      setLiveNote("Inj choice — " + nm);
+      toast("Inj choice: " + nm);
+      renderOverlayControls();
+    }
 
     function choosePosition(pos) {
       const who = live.choiceFor;
@@ -1703,26 +1935,54 @@
       renderOverlayControls();
     }
 
+    /** SW event-log colors by outcome from OUR wrestler's perspective: success=green, fail=red */
+    function swOutcome(direction, category, move) {
+      if (move === "Disqualification" || /Disqualification/i.test(move || "")) return "dq";
+      // Opponent completed a scoring action against us → fail (red in SW)
+      if (direction === "defense") {
+        if (category === "Penalty/DQ") {
+          // Opp committed penalty/stall/caution/forfeit → good for us
+          if (/Forfeit/i.test(move || "")) return "success";
+          return "success";
+        }
+        return "fail";
+      }
+      // We acted
+      if (direction === "offense") {
+        if (category === "Penalty/DQ") {
+          // We forfeited / were penalized → fail for us
+          if (/Forfeit/i.test(move || "")) return "fail";
+          // Penalty/stall points against us still logged as applied; SW treats athlete-centric fails for scoring-against
+          if (/^Penalty/i.test(move || "") || /Stalling/i.test(move || "") || /Caution/i.test(move || "")) return "fail";
+          return "fail";
+        }
+        return "success";
+      }
+      return "success";
+    }
+
     function addScore(direction, category, move, points, opts) {
+      opts = opts || {};
+      if (matchAwaitingStart) { toast("Tap REC to start match"); return; }
       // Allow terminal scoring actions even when ending flag will trip after this call
       const terminal = move === "Pin / Fall" || move === "Disqualification" || move === "Forfeit";
       if (isMatchEnding() && !terminal) { toast("Match ending — tap End Match"); return; }
-      pushUndoSnapshot("score");
-      opts = opts || {}; const isPenalty = category === "Penalty/DQ"; let ourDelta = 0, oppDelta = 0;
+      if (!opts.skipUndoSnap) pushUndoSnapshot("score");
+      const isPenalty = category === "Penalty/DQ"; let ourDelta = 0, oppDelta = 0;
       if (isPenalty) { if (direction === "offense") oppDelta = points; else ourDelta = points; } else if (move !== "Pin / Fall" && move !== "Disqualification" && move !== "Forfeit") { if (direction === "offense") ourDelta = points; else oppDelta = points; }
       live.ourP += ourDelta; live.oppP += oppDelta;
       
       let detailStr = move === "Pin / Fall" ? "Pin / Fall" : (opts.detail || "");
       if (move === "Pin / Fall" || move === "Disqualification" || move === "Forfeit" || Math.abs(live.ourP - live.oppP) >= 15) detailStr += " @ " + videoTimestamp();
 
-      live.events.push({ id: Math.random().toString(36).slice(2, 9), period: live.period, category, move, direction, outcome: (move==="Disqualification"?"dq":"success"), points: isPenalty ? points : (move === "Pin / Fall" || move === "Disqualification" || move === "Forfeit" ? 0 : (direction === "offense" ? ourDelta : oppDelta)), timestamp: videoTimestamp(), detail: detailStr, source: "mat-side-live", ts: Date.now() });
+      const outcome = swOutcome(direction, category, move);
+      live.events.push({ id: Math.random().toString(36).slice(2, 9), period: live.period, category, move, direction, outcome: outcome, points: isPenalty ? points : (move === "Pin / Fall" || move === "Disqualification" || move === "Forfeit" ? 0 : (direction === "offense" ? ourDelta : oppDelta)), timestamp: videoTimestamp(), detail: detailStr, source: "mat-side-live", ts: Date.now() });
       document.getElementById("live-our-pts").textContent = String(live.ourP); document.getElementById("live-opp-pts").textContent = String(live.oppP);
 
       if (!isPenalty && move !== "Pin / Fall" && move !== "Disqualification" && move !== "Forfeit") {
         if (category === "Takedown" || move === "Takedown") live.position = direction === "offense" ? "top_our" : "top_opp";
         else if (category === "Escape" || move === "Escape") live.position = "neutral";
         else if (category === "Reversal" || move === "Reversal") live.position = direction === "offense" ? "top_our" : "top_opp";
-        else if (opts.enterNf) live.position = direction === "offense" ? "nf_our" : "nf_opp";
         else if (opts.nfPoints) live.position = direction === "offense" ? "top_our" : "top_opp";
       }
       if (move === "Pin / Fall") toast(direction === "offense" ? "PIN — Us" : "PIN — Opp");
@@ -1895,22 +2155,26 @@
       return `<div class="live-footer-fixed">${portraitCtrlHtml(noteHtml)}</div>`;
     }
 
-    function allowDefer() { return live.period !== "P3"; }
+    function allowDefer() { const p = live && live.period; return p !== "P3" && p !== "OT" && !/^OT\d+$/.test(String(p || "")); }
     function nextPenaltyAward(who) { const count = (who === "our" ? (live.penOur || 0) : (live.penOpp || 0)) + 1; if (count >= 4) return { points: 0, count, dq: true }; if (count === 3) return { points: 2, count, dq: false }; return { points: 1, count, dq: false }; }
 
     function addPenalty(direction) {
       const who = direction === "offense" ? "our" : "opp"; const award = nextPenaltyAward(who);
+      // Snapshot BEFORE incrementing penalty counts so undo restores the prior count
+      pushUndoSnapshot("score");
+      consumeTopMenuSnapshot();
       if (who === "our") live.penOur = award.count; else live.penOpp = award.count;
       if (award.dq) {
         live.dq = who;
-        addScore(direction, "Penalty/DQ", "Disqualification", 0, {detail: "4th Penalty DQ"});
+        addScore(direction, "Penalty/DQ", "Disqualification", 0, {detail: "4th Penalty DQ", skipUndoSnap: true});
         toast(who === "our" ? "DQ — Us (4th penalty)" : "DQ — Opponent (4th penalty)"); return;
       }
-      addScore(direction, "Penalty/DQ", award.count === 3 ? "Penalty (3rd · 2 pts)" : "Penalty (" + award.count + ")", award.points, { detail: "penalty #" + award.count, skipPenCount: true });
+      addScore(direction, "Penalty/DQ", award.count === 3 ? "Penalty (3rd · 2 pts)" : "Penalty (" + award.count + ")", award.points, { detail: "penalty #" + award.count, skipPenCount: true, skipUndoSnap: true });
       toast((who === "our" ? "Us" : "Opp") + " penalty #" + award.count + " · +" + award.points);
     }
 
     function openEndMenu(who) {
+      if (matchAwaitingStart) { toast("Tap REC to start match"); return; }
       if (isMatchEnding()) return;
       // Memo so UNDO backs out of this menu instead of undoing the prior score
       pushUndoSnapshot("menu");
@@ -1922,7 +2186,8 @@
     function triggerEndAction(who, action) {
       const dir = who === "our" ? "offense" : "defense";
       const ts = videoTimestamp();
-      // Closing menu snapshot is still on stack; scoring will push its own score snapshot
+      // Consume menu memo first so the score snapshot is the top undo entry
+      consumeTopMenuSnapshot();
       if (action === "pin") {
         addScore(dir, "Near Fall / Pin", "Pin / Fall", 0, { detail: "Pin / Fall @ " + ts });
       } else if (action === "dq") {
@@ -1936,6 +2201,7 @@
     }
 
     function openPenMenu(who) {
+      if (matchAwaitingStart) { toast("Tap REC to start match"); return; }
       if (isMatchEnding()) return;
       pushUndoSnapshot("menu");
       live.endPhase = null;
@@ -1974,7 +2240,11 @@
     }
 
     function recBadgeText() {
-      if (!recording) return "SCORE " + formatMmSs(effectiveRecordSec());
+      if (matchAwaitingStart) return "● REC START";
+      if (!recording) {
+        if (recPaused) return "❚❚ PAUSED " + formatMmSs((live && live._frozenRecSec != null) ? live._frozenRecSec : effectiveRecordSec());
+        return "SCORE " + formatMmSs(effectiveRecordSec());
+      }
       if (recPaused) return "❚❚ PAUSED " + formatMmSs((live && live._frozenRecSec != null) ? live._frozenRecSec : effectiveRecordSec());
       return "● REC " + formatMmSs(effectiveRecordSec());
     }
@@ -2080,13 +2350,23 @@
       const oppPenLbl = "P/S/C";
 
       if (pos === "nf_our") {
-        const left = [{ label: "N2", cls: "our", onclick: "addScore('offense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})" }, { label: "N3", cls: "our", onclick: "addScore('offense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})" }, { label: "N4", cls: "our", onclick: "addScore('offense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})" }];
-        const portrait = `<div class="ov-grid g3"><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})">N2</button><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})">N3</button><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})">N4</button></div>`;
+        const left = [
+          { label: "N2", cls: "our", onclick: "addScore('offense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})" },
+          { label: "N3", cls: "our", onclick: "addScore('offense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})" },
+          { label: "N4", cls: "our", onclick: "addScore('offense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})" },
+          { label: "N5", cls: "our", onclick: "addScore('offense','Near Fall / Pin','5-Point NF',5,{nfPoints:1})" }
+        ];
+        const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})">N2</button><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})">N3</button><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})">N4</button><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','5-Point NF',5,{nfPoints:1})">N5</button></div>`;
         host.innerHTML = layoutSides(left, [], "", portrait) + footRailHtml(lastActionHtml); updateEndMatchFlash(); return;
       }
       if (pos === "nf_opp") {
-        const right = [{ label: "N2", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})" }, { label: "N3", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})" }, { label: "N4", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})" }];
-        const portrait = `<div class="ov-grid g3"><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})">N2</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})">N3</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})">N4</button></div>`;
+        const right = [
+          { label: "N2", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})" },
+          { label: "N3", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})" },
+          { label: "N4", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})" },
+          { label: "N5", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','5-Point NF',5,{nfPoints:1})" }
+        ];
+        const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','2-Point NF',2,{nfPoints:1})">N2</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','3-Point NF',3,{nfPoints:1})">N3</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','4-Point NF',4,{nfPoints:1})">N4</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','5-Point NF',5,{nfPoints:1})">N5</button></div>`;
         host.innerHTML = layoutSides([], right, "", portrait) + footRailHtml(lastActionHtml); updateEndMatchFlash(); return;
       }
 
@@ -2110,9 +2390,9 @@
           const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn our" onclick="addScore('offense','Exposure','Exposure',2)">EX2</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Reversal','Reversal',2)">R2</button><button type="button" class="ov-btn our" onclick="openEndMenu('our')">PIN/DQ/FFT</button><button type="button" class="ov-btn opp" onclick="openPenMenu('opp')">${oppPenLbl}</button><button type="button" class="ov-btn our" onclick="openPenMenu('our')">${ourPenLbl}</button></div>`;
           host.innerHTML = layoutSides(left, right, "", portrait) + footRailHtml(lastActionHtml); updateEndMatchFlash(); return;
         }
-        const left = [{ label: "NF", cls: "our", onclick: "addScore('offense','Near Fall / Pin','Near Fall',0,{enterNf:1})" }, { label: "PIN/DQ/FFT", cls: "our", onclick: "openEndMenu(\'our\')" }, { label: ourPenLbl, cls: "our", onclick: "openPenMenu('our')" }];
+        const left = [{ label: "NF", cls: "our", onclick: "enterNearFall('offense')" }, { label: "PIN/DQ/FFT", cls: "our", onclick: "openEndMenu(\'our\')" }, { label: ourPenLbl, cls: "our", onclick: "openPenMenu('our')" }];
         const right = [{ label: "E1", cls: "opp", onclick: "addScore('defense','Escape','Escape',1)" }, { label: "R2", cls: "opp", onclick: "addScore('defense','Reversal','Reversal',2)" }, { label: oppPenLbl, cls: "opp", onclick: "openPenMenu('opp')" }];
-        const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn our" onclick="addScore('offense','Near Fall / Pin','Near Fall',0,{enterNf:1})">NF</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Escape','Escape',1)">E1</button><button type="button" class="ov-btn our" onclick="openEndMenu('our')">PIN/DQ/FFT</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Reversal','Reversal',2)">R2</button><button type="button" class="ov-btn our" onclick="openPenMenu('our')">${ourPenLbl}</button><button type="button" class="ov-btn opp" onclick="openPenMenu('opp')">${oppPenLbl}</button></div>`;
+        const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn our" onclick="enterNearFall('offense')">NF</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Escape','Escape',1)">E1</button><button type="button" class="ov-btn our" onclick="openEndMenu('our')">PIN/DQ/FFT</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Reversal','Reversal',2)">R2</button><button type="button" class="ov-btn our" onclick="openPenMenu('our')">${ourPenLbl}</button><button type="button" class="ov-btn opp" onclick="openPenMenu('opp')">${oppPenLbl}</button></div>`;
         host.innerHTML = layoutSides(left, right, "", portrait) + footRailHtml(lastActionHtml); updateEndMatchFlash(); return;
       }
 
@@ -2124,8 +2404,8 @@
           host.innerHTML = layoutSides(left, right, "", portrait) + footRailHtml(lastActionHtml); updateEndMatchFlash(); return;
         }
         const left = [{ label: "E1", cls: "our", onclick: "addScore('offense','Escape','Escape',1)" }, { label: "R2", cls: "our", onclick: "addScore('offense','Reversal','Reversal',2)" }, { label: ourPenLbl, cls: "our", onclick: "openPenMenu('our')" }];
-        const right = [{ label: "NF", cls: "opp", onclick: "addScore('defense','Near Fall / Pin','Near Fall',0,{enterNf:1})" }, { label: "PIN/DQ/FFT", cls: "opp", onclick: "openEndMenu(\'opp\')" }, { label: oppPenLbl, cls: "opp", onclick: "openPenMenu('opp')" }];
-        const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn our" onclick="addScore('offense','Escape','Escape',1)">E1</button><button type="button" class="ov-btn opp" onclick="addScore('defense','Near Fall / Pin','Near Fall',0,{enterNf:1})">NF</button><button type="button" class="ov-btn our" onclick="addScore('offense','Reversal','Reversal',2)">R2</button><button type="button" class="ov-btn opp" onclick="openEndMenu('opp')">PIN/DQ/FFT</button><button type="button" class="ov-btn our" onclick="openPenMenu('our')">${ourPenLbl}</button><button type="button" class="ov-btn opp" onclick="openPenMenu('opp')">${oppPenLbl}</button></div>`;
+        const right = [{ label: "NF", cls: "opp", onclick: "enterNearFall('defense')" }, { label: "PIN/DQ/FFT", cls: "opp", onclick: "openEndMenu(\'opp\')" }, { label: oppPenLbl, cls: "opp", onclick: "openPenMenu('opp')" }];
+        const portrait = `<div class="ov-grid g2"><button type="button" class="ov-btn our" onclick="addScore('offense','Escape','Escape',1)">E1</button><button type="button" class="ov-btn opp" onclick="enterNearFall('defense')">NF</button><button type="button" class="ov-btn our" onclick="addScore('offense','Reversal','Reversal',2)">R2</button><button type="button" class="ov-btn opp" onclick="openEndMenu('opp')">PIN/DQ/FFT</button><button type="button" class="ov-btn our" onclick="openPenMenu('our')">${ourPenLbl}</button><button type="button" class="ov-btn opp" onclick="openPenMenu('opp')">${oppPenLbl}</button></div>`;
         host.innerHTML = layoutSides(left, right, "", portrait) + footRailHtml(lastActionHtml); updateEndMatchFlash(); return;
       }
       host.innerHTML = controlRailHtml(); updateEndMatchFlash();
@@ -2139,9 +2419,69 @@
       });
     }
 
+    let _utbResolver = null;
+    function showUtbModal() {
+      return new Promise((resolve) => {
+        _utbResolver = resolve;
+        const modal = document.getElementById("utb-modal");
+        const body = document.getElementById("utb-body");
+        const ourBtn = document.getElementById("utb-our-btn");
+        const oppBtn = document.getElementById("utb-opp-btn");
+        if (body) {
+          body.textContent = "Score is tied " + (live.ourP || 0) + "–" + (live.oppP || 0) +
+            ". Who won the Ultimate Tie Breaker? Winner receives 1 match point.";
+        }
+        if (ourBtn) ourBtn.textContent = (live.wrestlerName || "Us") + " (+1)";
+        if (oppBtn) oppBtn.textContent = (live.opponent || "Opp") + " (+1)";
+        if (modal) modal.classList.add("visible");
+      });
+    }
+    function resolveUtbWinner(who) {
+      const modal = document.getElementById("utb-modal");
+      if (modal) modal.classList.remove("visible");
+      const r = _utbResolver; _utbResolver = null;
+      if (r) r(who);
+    }
+    function cancelUtbWinner() {
+      const modal = document.getElementById("utb-modal");
+      if (modal) modal.classList.remove("visible");
+      const r = _utbResolver; _utbResolver = null;
+      if (r) r(null);
+    }
+    function awardUtbPoint(who) {
+      if (!live || !who) return;
+      const dir = who === "our" ? "offense" : "defense";
+      // Force period label to OT4 for the logged event if still in regulation OT path
+      if (!live.period || live.period === "P3" || live.period === "OT" || live.period === "OT2" || live.period === "OT3") {
+        live.period = "OT4";
+        const btn = document.getElementById("period-btn");
+        if (btn) btn.textContent = "OT4";
+      }
+      addScore(dir, "Tie Breaker", "Ultimate Tie Breaker", 1, { detail: "UTB · 1 pt" });
+      toast(who === "our" ? "UTB — Us +1" : "UTB — Opp +1");
+    }
+    function matchIsTiedForUtb() {
+      if (!live) return false;
+      if ((live.ourP || 0) !== (live.oppP || 0)) return false;
+      // Terminal results already decide the bout
+      if (live.dq) return false;
+      const term = (live.events || []).some(e =>
+        e.move === "Pin / Fall" || e.move === "Disqualification" || e.move === "Forfeit" || e.outcome === "dq"
+      );
+      return !term;
+    }
+
     async function endLiveMatch() {
-      if (!confirm("End match and save?")) return;
-      clearInterval(recTimer); const videoBlob = await stopRecorder(); recording = false;
+      if (matchAwaitingStart) { toast("Tap REC to start match first"); return; }
+      if (matchIsTiedForUtb()) {
+        const winner = await showUtbModal();
+        if (!winner) { toast("End match cancelled"); return; }
+        awardUtbPoint(winner);
+        // Proceed straight to save after UTB (already chose a winner)
+      } else if (!confirm("End match and save?")) {
+        return;
+      }
+      clearInterval(recTimer); const videoBlob = await stopRecorder(); recording = false; matchAwaitingStart = false; setStartOverlayVisible(false);
       if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
 
       const packageId = uid();
@@ -2252,8 +2592,8 @@
       if (jsonBtn) jsonBtn.classList.remove("downloaded");
       if (vidBtn) {
         vidBtn.classList.remove("downloaded");
-        const hasVid = !!(lastPackage && lastPackage.videoBlob && lastPackage.json && lastPackage.json.match && lastPackage.json.match.wrestlerName === m.wrestlerName);
-        vidBtn.style.display = hasVid ? "block" : "block";
+        const hasVid = !!(m.hasVideo || m.videoId || (lastPackage && lastPackage.videoBlob));
+        vidBtn.style.display = "block";
         vidBtn.style.opacity = hasVid ? "1" : "0.45";
       }
       showScreen("screen-review");
@@ -2270,16 +2610,27 @@
       if (btn) btn.classList.add("downloaded");
       toast("JSON downloaded");
     }
-    function downloadPackageVideoFromReview() {
+    async function downloadPackageVideoFromReview() {
       const btn = document.getElementById("rev-dl-video");
       if (btn && btn.classList.contains("downloaded")) { toast("Video already downloaded"); return; }
       if (lastPackage && lastPackage.videoBlob) {
         downloadBlob(lastPackage.videoBlob, lastPackage.videoName);
         if (btn) btn.classList.add("downloaded");
         toast("Video downloaded");
-      } else {
-        toast("Video only available in this session after live scoring");
+        return;
       }
+      const m = reviewMatch && reviewMatch.match;
+      const vidId = m && (m.videoId || (m.package && m.package.packageId));
+      if (vidId) {
+        const row = await getStoredVideo(vidId);
+        if (row && row.blob) {
+          downloadBlob(row.blob, row.fileName || (m.videoFileName) || (vidId + ".webm"));
+          if (btn) btn.classList.add("downloaded");
+          toast("Video downloaded");
+          return;
+        }
+      }
+      toast("No video stored for this match");
     }
     function discardAndReopenMatch() {
       if(!confirm("Are you sure you want to discard these scores and reopen the match?")) return;
