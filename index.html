@@ -31,9 +31,30 @@
       --safeBottom: env(safe-area-inset-bottom, 0px);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; background: var(--mat); color: var(--chalk); font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
-    body { display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; }
-    body.live-active { max-width: none; width: 100%; height: 100%; height: 100dvh; overflow: hidden; }
+    html, body {
+      height: 100%;
+      height: 100dvh;
+      height: 100svh;
+      background: var(--mat);
+      color: var(--chalk);
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      max-width: 560px;
+      margin: 0 auto;
+      min-height: 0; /* allow flex children to shrink so .screen can scroll */
+    }
+    body.live-active {
+      max-width: none;
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      height: 100svh;
+      overflow: hidden;
+    }
 
     .topbar {
       display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -44,7 +65,16 @@
     .top-meta strong { color: var(--chalk); }
     .back-btn { background: none; border: none; color: var(--gold); font-size: 13px; font-weight: 800; cursor: pointer; padding: 4px 0; text-transform: uppercase; letter-spacing: 0.5px; }
 
-    .screen { flex: 1; overflow-y: auto; padding: 12px; padding-bottom: calc(16px + var(--safeBottom)); display: none; }
+    .screen {
+      flex: 1 1 auto;
+      min-height: 0; /* critical: flex item must be allowed to shrink below content size */
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      padding: 12px;
+      padding-bottom: calc(16px + var(--safeBottom));
+      display: none;
+    }
     .screen.active { display: block; }
 
     .card { background: var(--panel); border: 1px solid var(--panelLine); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
@@ -717,10 +747,11 @@
     <div class="admin-grid-2">
       <div class="card">
         <div class="card-title">Google Drive Sync</div>
-        <label>Client ID</label>
-        <input id="gdrive-client-id" class="input" placeholder="Google Cloud Client ID" />
-        <label>API Key</label>
-        <input id="gdrive-api-key" class="input" type="password" placeholder="Google Cloud API Key" />
+        <p class="muted" style="margin-bottom:10px;">Same OAuth Client ID you use in Strategic Wrestler works here. API Key is optional (only needed for some older setups).</p>
+        <label>OAuth Client ID</label>
+        <input id="gdrive-client-id" class="input" placeholder="xxxx.apps.googleusercontent.com" />
+        <label>API Key <span style="font-weight:600; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+        <input id="gdrive-api-key" class="input" type="password" placeholder="Leave blank if you only have Client ID" />
         <div class="btn-row">
           <button type="button" class="btn btn-gold" onclick="saveDriveCreds()">Save Creds</button>
           <button type="button" class="btn btn-green" onclick="authGoogleDrive()">Authorize Drive</button>
@@ -2649,17 +2680,20 @@
           status.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">No roster loaded yet</div>`;
         }
       }
-      try { document.getElementById("gdrive-client-id").value = store.gapiClientId || ""; } catch (e) {}
+      try {
+        document.getElementById("gdrive-client-id").value = store.gapiClientId || "";
+        document.getElementById("gdrive-api-key").value = store.gapiKey || "";
+      } catch (e) {}
       const gd = document.getElementById("gdrive-status");
       if (gd) {
         let tokenOk = false;
         try { tokenOk = !!(gapiInited && gapi.client && gapi.client.getToken()); } catch (e) {}
         if (tokenOk) {
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Google Drive authorized</div>`;
-        } else if (gapiInited) {
+        } else if (gapiInited && tokenClient) {
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:800; font-size:13px;">Ready — tap Authorize Drive</div>`;
-        } else if (store.gapiClientId && store.gapiKey) {
-          gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:700; font-size:13px;">Credentials saved · not connected yet</div>`;
+        } else if (store.gapiClientId) {
+          gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:700; font-size:13px;">Client ID saved · not connected yet</div>`;
         } else {
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">Not connected</div>`;
         }
@@ -2735,24 +2769,110 @@
     function clearAllEvents() { if (!confirm("Delete all events and match scores? Roster is kept.")) return; store.events = []; saveStore(); updateAdminUI(); toast("Events cleared"); }
 
     // ─── GOOGLE DRIVE API ───────────────────────────────────────────
-    function saveDriveCreds() { store.gapiClientId = document.getElementById("gdrive-client-id").value.trim(); store.gapiKey = document.getElementById("gdrive-api-key").value.trim(); saveStore(); toast("Google Cloud Credentials Saved"); initGoogleClient(); }
+    // Modern flow: OAuth Client ID is required. API Key is optional
+    // (Google's current Drive JS quickstart no longer requires it for uploads).
+    function saveDriveCreds() {
+      store.gapiClientId = document.getElementById("gdrive-client-id").value.trim();
+      store.gapiKey = document.getElementById("gdrive-api-key").value.trim();
+      saveStore();
+      if (!store.gapiClientId) {
+        toast("Enter your OAuth Client ID");
+        return;
+      }
+      toast("Credentials saved");
+      initGoogleClient();
+    }
     async function initGoogleClient() {
-      if (!store.gapiClientId || !store.gapiKey) return;
-      gapi.load('client', async () => {
+      if (!store.gapiClientId) return;
+      if (typeof gapi === "undefined" || typeof google === "undefined" || !google.accounts) {
+        const gd = document.getElementById("gdrive-status");
+        if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded — check network / refresh</div>`;
+        return;
+      }
+      gapi.load("client", async () => {
         try {
-          await gapi.client.init({ apiKey: store.gapiKey, discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+          const initOpts = {
+            discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
+          };
+          // API key is optional; only include when provided
+          if (store.gapiKey) initOpts.apiKey = store.gapiKey;
+          await gapi.client.init(initOpts);
           gapiInited = true;
-          tokenClient = google.accounts.oauth2.initTokenClient({ client_id: store.gapiClientId, scope: SCOPES, callback: (tokenResponse) => { if (tokenResponse.error !== undefined) throw tokenResponse; document.getElementById("gdrive-status").innerHTML = `<span style="color:var(--green);">Authorized to Drive</span>`; toast("Google Drive Authorized"); } });
-          document.getElementById("gdrive-status").innerHTML = `<span style="color:var(--gold);">Ready for Auth</span>`;
-        } catch(e) { document.getElementById("gdrive-status").textContent = "API Error. Check keys."; }
+          tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: store.gapiClientId,
+            scope: SCOPES,
+            callback: (tokenResponse) => {
+              if (tokenResponse.error !== undefined) {
+                console.error(tokenResponse);
+                toast("Auth failed: " + (tokenResponse.error || "unknown"));
+                return;
+              }
+              // Put token into gapi so getToken() works for uploads
+              try { gapi.client.setToken(tokenResponse); } catch (e) {}
+              const gd = document.getElementById("gdrive-status");
+              if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Google Drive authorized</div>`;
+              toast("Google Drive authorized");
+            }
+          });
+          const gd = document.getElementById("gdrive-status");
+          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:800; font-size:13px;">Ready — tap Authorize Drive</div>`;
+        } catch (e) {
+          console.error(e);
+          const gd = document.getElementById("gdrive-status");
+          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Client ID / origins</div>`;
+        }
       });
     }
-    function authGoogleDrive() { if (!tokenClient) return alert("Save Client ID and API Key first."); if (gapi.client.getToken() === null) tokenClient.requestAccessToken({ prompt: 'consent' }); else tokenClient.requestAccessToken({ prompt: '' }); }
+    function authGoogleDrive() {
+      if (!store.gapiClientId) return alert("Enter and save your OAuth Client ID first (same one as Strategic Wrestler).");
+      if (!tokenClient) {
+        // Try init again then auth
+        initGoogleClient();
+        setTimeout(() => {
+          if (!tokenClient) return alert("Could not initialize Google client. Check Client ID and that this page origin is listed under Authorized JavaScript origins in Google Cloud Console.");
+          requestDriveToken();
+        }, 800);
+        return;
+      }
+      requestDriveToken();
+    }
+    function requestDriveToken() {
+      try {
+        const existing = gapi.client && gapi.client.getToken && gapi.client.getToken();
+        if (!existing) tokenClient.requestAccessToken({ prompt: "consent" });
+        else tokenClient.requestAccessToken({ prompt: "" });
+      } catch (e) {
+        console.error(e);
+        toast("Auth error — see console");
+      }
+    }
     async function uploadToDrive(blob, filename, mimeType) {
-      if (!gapiInited || gapi.client.getToken() === null) { alert("Not authorized with Google Drive. Check Admin tab."); return false; }
-      const metadata = { name: filename, mimeType }; const form = new FormData();
-      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' })); form.append('file', blob);
-      try { const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }), body: form }); const data = await res.json(); return !!data.id; } catch (e) { console.error("Drive upload failed", e); return false; }
+      let token = null;
+      try { token = gapi.client && gapi.client.getToken && gapi.client.getToken(); } catch (e) {}
+      if (!token || !token.access_token) {
+        alert("Not authorized with Google Drive. Go to Admin → Authorize Drive.");
+        return false;
+      }
+      const metadata = { name: filename, mimeType: mimeType || blob.type || "application/octet-stream" };
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+      form.append("file", blob);
+      try {
+        const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+          method: "POST",
+          headers: new Headers({ Authorization: "Bearer " + token.access_token }),
+          body: form
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          console.error("Drive upload error", data);
+          return false;
+        }
+        return !!data.id;
+      } catch (e) {
+        console.error("Drive upload failed", e);
+        return false;
+      }
     }
     async function uploadPackageToDrive() {
       if (!lastPackage) return; toast("Uploading to Drive..."); let success = true;
@@ -2797,22 +2917,52 @@
         root.style.setProperty("--live-btn-fs", btnFs + "px");
       } catch (e) {}
     }
+    function reflowActiveScreen() {
+      try {
+        const active = document.querySelector(".screen.active");
+        if (active) {
+          void active.offsetHeight;
+          const h = Math.round((window.visualViewport && window.visualViewport.height) || window.innerHeight || 0);
+          if (h && !document.body.classList.contains("live-active")) {
+            document.documentElement.style.height = h + "px";
+            document.body.style.height = h + "px";
+          }
+        }
+      } catch (e) {}
+    }
     window.addEventListener("orientationchange", () => {
-      setTimeout(() => { try { fitLiveViewport(); renderOverlayControls(); } catch (e) {} }, 200);
+      setTimeout(() => {
+        try {
+          fitLiveViewport();
+          renderOverlayControls();
+          reflowActiveScreen();
+        } catch (e) {}
+      }, 200);
     });
     window.addEventListener("resize", () => {
       clearTimeout(window._msOrientT);
-      window._msOrientT = setTimeout(() => { try { fitLiveViewport(); renderOverlayControls(); } catch (e) {} }, 120);
+      window._msOrientT = setTimeout(() => {
+        try {
+          fitLiveViewport();
+          renderOverlayControls();
+          reflowActiveScreen();
+        } catch (e) {}
+      }, 120);
     });
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", () => {
         clearTimeout(window._msVvT);
-        window._msVvT = setTimeout(() => { try { fitLiveViewport(); } catch (e) {} }, 50);
+        window._msVvT = setTimeout(() => {
+          try {
+            fitLiveViewport();
+            reflowActiveScreen();
+          } catch (e) {}
+        }, 50);
       });
     }
 
     loadStore(); document.getElementById("top-meta").title = "Build " + MAT_SIDE_BUILD;
-    if(store.gapiClientId && store.gapiKey) initGoogleClient();
+    if (store.gapiClientId) initGoogleClient();
     renderHome();
   </script>
 </body>
