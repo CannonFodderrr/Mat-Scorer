@@ -45,7 +45,7 @@
       flex-direction: column;
       max-width: 560px;
       margin: 0 auto;
-      min-height: 0; /* allow flex children to shrink so .screen can scroll */
+      min-height: 0;
     }
     body.live-active {
       max-width: none;
@@ -67,7 +67,7 @@
 
     .screen {
       flex: 1 1 auto;
-      min-height: 0; /* critical: flex item must be allowed to shrink below content size */
+      min-height: 0;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
@@ -550,7 +550,7 @@
       </div>
 
       <div id="ae-import">
-        <p class="muted" style="margin-bottom:10px;">Import a Mat Scout event JSON here to load the roster and dual.</p>
+        <p class="muted" style="margin-bottom:10px;">Import a Mat Scout / Strategic Wrestler event JSON (from your mapped Drive or local folder) to load the roster and dual.</p>
         <input type="file" id="ae-sync-file" class="input" accept="application/json,.json" />
         <div id="ae-import-status" class="muted"></div>
       </div>
@@ -718,8 +718,8 @@
       <div class="card-title">Match Save</div>
       <p class="muted" id="done-summary" style="margin-bottom:12px;"></p>
       
-      <button class="btn btn-green" type="button" id="btn-download-package" onclick="downloadPackageAll()">Save Local Files</button>
-      <button class="btn btn-green" type="button" id="btn-upload-gdrive" onclick="uploadPackageToDrive()" style="margin-top:8px;">Upload to Google Drive</button>
+      <button class="btn btn-green" type="button" id="btn-save-primary" onclick="savePackagePrimary()">Save to Google Drive</button>
+      <button class="btn btn-ghost" type="button" id="btn-save-local" onclick="downloadPackageAll()" style="margin-top:8px;">Save local files</button>
       <button class="btn btn-gold" type="button" id="btn-next-match" onclick="goNextMatch()" style="margin-top:16px;">Next match</button>
       <button class="btn btn-gold" type="button" style="margin-top:8px;" onclick="afterMatchDone()">Back to Weight Classes</button>
       <button class="btn btn-red" type="button" style="margin-top:12px;" onclick="discardSavedMatch()">Discard Match</button>
@@ -746,31 +746,30 @@
   <div id="screen-admin" class="screen">
     <div class="admin-grid-2">
       <div class="card">
-        <div class="card-title">Google Drive Sync</div>
-        <p class="muted" style="margin-bottom:10px;">Same OAuth Client ID you use in Strategic Wrestler works here. API Key is optional (only needed for some older setups).</p>
+        <div class="card-title">Google Drive</div>
+        <p class="muted" style="margin-bottom:10px;">Paste the same OAuth Client ID used in Strategic Wrestler, then Authorize.</p>
         <label>OAuth Client ID</label>
         <input id="gdrive-client-id" class="input" placeholder="xxxx.apps.googleusercontent.com" />
-        <label>API Key <span style="font-weight:600; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
-        <input id="gdrive-api-key" class="input" type="password" placeholder="Leave blank if you only have Client ID" />
-        <div class="btn-row">
-          <button type="button" class="btn btn-gold" onclick="saveDriveCreds()">Save Creds</button>
-          <button type="button" class="btn btn-green" onclick="authGoogleDrive()">Authorize Drive</button>
-        </div>
+        <button type="button" class="btn btn-green" onclick="authGoogleDrive()">Authorize Drive</button>
         <p class="muted" style="margin-top:8px;" id="gdrive-status">Not connected</p>
       </div>
 
       <div class="card">
         <div class="card-title">Team roster</div>
-        <p class="muted" style="margin-bottom:10px;">Import a Strategic Wrestler season export to load the full team roster.</p>
+        <p class="muted" style="margin-bottom:10px;">Import a Strategic Wrestler season export (from your mapped folder or device).</p>
         <input type="file" id="admin-roster-file" class="input" accept="application/json,.json" />
         <div id="admin-roster-status" class="muted"></div>
         <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearAdminRoster()">Clear roster</button>
       </div>
       
       <div class="card">
-        <div class="card-title">Local Folder Save</div>
-        <p class="muted" style="margin-bottom:10px;">Chrome/Edge: pick a folder; MatSide creates event folders for videos and JSONs.</p>
-        <button type="button" class="btn btn-gold" style="margin-top:8px;" onclick="pickLocalExportFolder()">Pick local folder</button>
+        <div class="card-title">Save locations</div>
+        <p class="muted" style="margin-bottom:10px;">When Google Drive is connected it is the default save location. Local folder is a fallback (Chrome/Edge).</p>
+        <label>Google Drive folder name</label>
+        <input id="gdrive-folder-name" class="input" placeholder="MatSide" onchange="saveGdriveFolderName()" />
+        <p class="muted" style="margin-top:-4px; margin-bottom:10px;" id="admin-gdrive-folder-status"></p>
+        <label>Local folder (optional fallback)</label>
+        <button type="button" class="btn btn-gold" style="margin-top:4px;" onclick="pickLocalExportFolder()">Pick local folder</button>
         <p class="muted" style="margin-top:10px;" id="admin-folder-status"></p>
       </div>
       
@@ -799,7 +798,8 @@
     let tokenClient;
     let gapiInited = false;
 
-    let store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", demoMode: false, seasonMeta: null, gapiClientId: "", gapiKey: "" };
+    let store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", gdriveFolder: "MatSide", demoMode: false, seasonMeta: null, gapiClientId: "" };
+    let driveFolderId = null; // cached Drive folder id for store.gdriveFolder
     
     let exportDirHandle = null; 
     let currentEventId = null;
@@ -2550,8 +2550,13 @@
       await writeBlobToExportDir(jsonBlob, base + ".json", evFolder);
 
       lastPackage = { json, videoBlob, videoName: json.video.fileName, jsonName: base + ".json", eventId: live.eventId, matchId: live.matchId, evFolder };
-      document.getElementById("done-summary").innerHTML = `<strong>${escHtml(live.wrestlerName)}</strong> vs <strong>${escHtml(live.opponent)}</strong><br/>Score ${live.ourP}–${live.oppP} · ${live.events.length} events` + (videoBlob ? ` · video ${(videoBlob.size / (1024 * 1024)).toFixed(1)} MB` : " · no video") + `<br/><span style="font-size:11px;">Saved to folder: ${escHtml(evFolder)}</span>`;
-      showScreen("screen-done"); toast(videoBlob ? "Match saved" : "Match saved without video");
+      const driveHint = isDriveConnected()
+        ? ` · default save: Google Drive / ${escHtml(store.gdriveFolder || "MatSide")}`
+        : (exportDirHandle ? ` · local folder linked` : "");
+      document.getElementById("done-summary").innerHTML = `<strong>${escHtml(live.wrestlerName)}</strong> vs <strong>${escHtml(live.opponent)}</strong><br/>Score ${live.ourP}–${live.oppP} · ${live.events.length} events` + (videoBlob ? ` · video ${(videoBlob.size / (1024 * 1024)).toFixed(1)} MB` : " · no video") + `<br/><span style="font-size:11px;">Event folder: ${escHtml(evFolder)}${driveHint}</span>`;
+      showScreen("screen-done");
+      updateSaveButtons();
+      toast(videoBlob ? "Match saved" : "Match saved without video");
     }
 
     function downloadBlob(blob, name) { const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); }
@@ -2682,14 +2687,15 @@
       }
       try {
         document.getElementById("gdrive-client-id").value = store.gapiClientId || "";
-        document.getElementById("gdrive-api-key").value = store.gapiKey || "";
+        const folderInput = document.getElementById("gdrive-folder-name");
+        if (folderInput) folderInput.value = store.gdriveFolder || "MatSide";
       } catch (e) {}
       const gd = document.getElementById("gdrive-status");
       if (gd) {
         let tokenOk = false;
         try { tokenOk = !!(gapiInited && gapi.client && gapi.client.getToken()); } catch (e) {}
         if (tokenOk) {
-          gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Google Drive authorized</div>`;
+          gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Google Drive authorized · default save location</div>`;
         } else if (gapiInited && tokenClient) {
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:800; font-size:13px;">Ready — tap Authorize Drive</div>`;
         } else if (store.gapiClientId) {
@@ -2698,14 +2704,26 @@
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">Not connected</div>`;
         }
       }
+      const gdFolderSt = document.getElementById("admin-gdrive-folder-status");
+      if (gdFolderSt) {
+        const name = store.gdriveFolder || "MatSide";
+        let tokenOk = false;
+        try { tokenOk = !!(gapiInited && gapi.client && gapi.client.getToken()); } catch (e) {}
+        if (tokenOk) {
+          gdFolderSt.innerHTML = `<span style="color:#b8e0c8; font-weight:700;">✓ Saves go to Drive / ${escHtml(name)}</span>`;
+        } else {
+          gdFolderSt.innerHTML = `Will use <strong>${escHtml(name)}</strong> on Drive after you authorize`;
+        }
+      }
       const folderSt = document.getElementById("admin-folder-status");
       if (folderSt) {
         if (exportDirHandle && exportDirHandle.name) {
-          folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Folder linked · ${escHtml(exportDirHandle.name)}</div>`;
+          folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Local folder · ${escHtml(exportDirHandle.name)}</div>`;
         } else {
-          folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">No folder linked this session</div>`;
+          folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">No local folder this session</div>`;
         }
       }
+      updateSaveButtons();
       listStoredVideos().then(vids => {
         const el = document.getElementById("admin-data-info");
         if (!el) return;
@@ -2769,34 +2787,57 @@
     function clearAllEvents() { if (!confirm("Delete all events and match scores? Roster is kept.")) return; store.events = []; saveStore(); updateAdminUI(); toast("Events cleared"); }
 
     // ─── GOOGLE DRIVE API ───────────────────────────────────────────
-    // Modern flow: OAuth Client ID is required. API Key is optional
-    // (Google's current Drive JS quickstart no longer requires it for uploads).
-    function saveDriveCreds() {
-      store.gapiClientId = document.getElementById("gdrive-client-id").value.trim();
-      store.gapiKey = document.getElementById("gdrive-api-key").value.trim();
+    function isDriveConnected() {
+      try { return !!(gapiInited && gapi.client && gapi.client.getToken() && gapi.client.getToken().access_token); }
+      catch (e) { return false; }
+    }
+    function getDriveAccessToken() {
+      try {
+        const t = gapi.client && gapi.client.getToken && gapi.client.getToken();
+        return t && t.access_token ? t.access_token : null;
+      } catch (e) { return null; }
+    }
+    function saveGdriveFolderName() {
+      const el = document.getElementById("gdrive-folder-name");
+      const name = (el && el.value.trim()) || "MatSide";
+      store.gdriveFolder = name;
+      driveFolderId = null; // force re-resolve
       saveStore();
-      if (!store.gapiClientId) {
-        toast("Enter your OAuth Client ID");
-        return;
+      updateAdminUI();
+      toast("Drive folder: " + name);
+    }
+    function updateSaveButtons() {
+      const primary = document.getElementById("btn-save-primary");
+      const local = document.getElementById("btn-save-local");
+      if (!primary) return;
+      if (isDriveConnected()) {
+        primary.textContent = "Save to Google Drive";
+        primary.className = "btn btn-green";
+        primary.onclick = () => savePackagePrimary();
+        if (local) local.style.display = "";
+      } else {
+        primary.textContent = "Save local files";
+        primary.className = "btn btn-green";
+        primary.onclick = () => downloadPackageAll();
+        if (local) local.style.display = "none";
       }
-      toast("Credentials saved");
-      initGoogleClient();
+    }
+    async function savePackagePrimary() {
+      if (isDriveConnected()) return uploadPackageToDrive();
+      return downloadPackageAll();
     }
     async function initGoogleClient() {
       if (!store.gapiClientId) return;
       if (typeof gapi === "undefined" || typeof google === "undefined" || !google.accounts) {
         const gd = document.getElementById("gdrive-status");
-        if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded — check network / refresh</div>`;
+        if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded — refresh page</div>`;
         return;
       }
       gapi.load("client", async () => {
         try {
-          const initOpts = {
+          await gapi.client.init({
             discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
-          };
-          // API key is optional; only include when provided
-          if (store.gapiKey) initOpts.apiKey = store.gapiKey;
-          await gapi.client.init(initOpts);
+          });
           gapiInited = true;
           tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: store.gapiClientId,
@@ -2807,38 +2848,44 @@
                 toast("Auth failed: " + (tokenResponse.error || "unknown"));
                 return;
               }
-              // Put token into gapi so getToken() works for uploads
               try { gapi.client.setToken(tokenResponse); } catch (e) {}
-              const gd = document.getElementById("gdrive-status");
-              if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Google Drive authorized</div>`;
+              driveFolderId = null;
+              updateAdminUI();
               toast("Google Drive authorized");
             }
           });
-          const gd = document.getElementById("gdrive-status");
-          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:800; font-size:13px;">Ready — tap Authorize Drive</div>`;
+          updateAdminUI();
         } catch (e) {
           console.error(e);
           const gd = document.getElementById("gdrive-status");
-          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Client ID / origins</div>`;
+          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Client ID / JavaScript origins</div>`;
         }
       });
     }
     function authGoogleDrive() {
-      if (!store.gapiClientId) return alert("Enter and save your OAuth Client ID first (same one as Strategic Wrestler).");
-      if (!tokenClient) {
-        // Try init again then auth
+      const input = document.getElementById("gdrive-client-id");
+      const id = (input && input.value.trim()) || store.gapiClientId || "";
+      if (!id) return alert("Paste your OAuth Client ID first (same one as Strategic Wrestler).");
+      store.gapiClientId = id;
+      // Also capture folder name if typed
+      const folderEl = document.getElementById("gdrive-folder-name");
+      if (folderEl && folderEl.value.trim()) store.gdriveFolder = folderEl.value.trim();
+      if (!store.gdriveFolder) store.gdriveFolder = "MatSide";
+      saveStore();
+      if (!tokenClient || tokenClient._clientId !== id) {
+        // (Re)init with this client id, then request token
         initGoogleClient();
         setTimeout(() => {
-          if (!tokenClient) return alert("Could not initialize Google client. Check Client ID and that this page origin is listed under Authorized JavaScript origins in Google Cloud Console.");
+          if (!tokenClient) return alert("Could not initialize Google client. Check Client ID and Authorized JavaScript origins.");
           requestDriveToken();
-        }, 800);
+        }, 700);
         return;
       }
       requestDriveToken();
     }
     function requestDriveToken() {
       try {
-        const existing = gapi.client && gapi.client.getToken && gapi.client.getToken();
+        const existing = getDriveAccessToken();
         if (!existing) tokenClient.requestAccessToken({ prompt: "consent" });
         else tokenClient.requestAccessToken({ prompt: "" });
       } catch (e) {
@@ -2846,21 +2893,53 @@
         toast("Auth error — see console");
       }
     }
-    async function uploadToDrive(blob, filename, mimeType) {
-      let token = null;
-      try { token = gapi.client && gapi.client.getToken && gapi.client.getToken(); } catch (e) {}
-      if (!token || !token.access_token) {
+    /** Find or create the mapped Drive folder (e.g. MatSide) and optional event subfolder */
+    async function ensureDriveFolder(eventFolderName) {
+      const token = getDriveAccessToken();
+      if (!token) return null;
+      const rootName = store.gdriveFolder || "MatSide";
+      async function findOrCreate(name, parentId) {
+        const q = parentId
+          ? `name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+          : `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`;
+        const listUrl = "https://www.googleapis.com/drive/v3/files?pageSize=5&fields=files(id,name)&q=" + encodeURIComponent(q);
+        const listRes = await fetch(listUrl, { headers: { Authorization: "Bearer " + token } });
+        const listData = await listRes.json();
+        if (listData.files && listData.files.length) return listData.files[0].id;
+        const meta = { name, mimeType: "application/vnd.google-apps.folder" };
+        if (parentId) meta.parents = [parentId];
+        const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify(meta)
+        });
+        const created = await createRes.json();
+        return created.id || null;
+      }
+      if (!driveFolderId) driveFolderId = await findOrCreate(rootName, null);
+      if (!driveFolderId) return null;
+      if (eventFolderName) return await findOrCreate(eventFolderName, driveFolderId);
+      return driveFolderId;
+    }
+    async function uploadToDrive(blob, filename, mimeType, eventFolderName) {
+      const token = getDriveAccessToken();
+      if (!token) {
         alert("Not authorized with Google Drive. Go to Admin → Authorize Drive.");
         return false;
       }
-      const metadata = { name: filename, mimeType: mimeType || blob.type || "application/octet-stream" };
+      const parentId = await ensureDriveFolder(eventFolderName || null);
+      const metadata = {
+        name: filename,
+        mimeType: mimeType || blob.type || "application/octet-stream"
+      };
+      if (parentId) metadata.parents = [parentId];
       const form = new FormData();
       form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
       form.append("file", blob);
       try {
         const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
           method: "POST",
-          headers: new Headers({ Authorization: "Bearer " + token.access_token }),
+          headers: new Headers({ Authorization: "Bearer " + token }),
           body: form
         });
         const data = await res.json();
@@ -2875,11 +2954,23 @@
       }
     }
     async function uploadPackageToDrive() {
-      if (!lastPackage) return; toast("Uploading to Drive..."); let success = true;
+      if (!lastPackage) return;
+      if (!isDriveConnected()) {
+        alert("Authorize Google Drive in Admin first.");
+        return;
+      }
+      toast("Uploading to Drive…");
+      let success = true;
       const jsonBlob = new Blob([JSON.stringify(lastPackage.json, null, 2)], { type: "application/json" });
-      const jRes = await uploadToDrive(jsonBlob, lastPackage.jsonName, 'application/json'); if (!jRes) success = false;
-      if (lastPackage.videoBlob) { const vRes = await uploadToDrive(lastPackage.videoBlob, lastPackage.videoName, lastPackage.videoBlob.type || 'video/webm'); if (!vRes) success = false; }
-      if (success) toast("Package uploaded successfully!"); else alert("Upload failed. Check console and Drive auth.");
+      const folder = lastPackage.evFolder || null;
+      const jRes = await uploadToDrive(jsonBlob, lastPackage.jsonName, "application/json", folder);
+      if (!jRes) success = false;
+      if (lastPackage.videoBlob) {
+        const vRes = await uploadToDrive(lastPackage.videoBlob, lastPackage.videoName, lastPackage.videoBlob.type || "video/webm", folder);
+        if (!vRes) success = false;
+      }
+      if (success) toast("Saved to Google Drive / " + (store.gdriveFolder || "MatSide"));
+      else alert("Upload failed. Check console and Drive auth.");
     }
 
     // ─── Boot ───────────────────────────────────────────────────────
@@ -2932,36 +3023,27 @@
     }
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
-        try {
-          fitLiveViewport();
-          renderOverlayControls();
-          reflowActiveScreen();
-        } catch (e) {}
+        try { fitLiveViewport(); renderOverlayControls(); reflowActiveScreen(); } catch (e) {}
       }, 200);
     });
     window.addEventListener("resize", () => {
       clearTimeout(window._msOrientT);
       window._msOrientT = setTimeout(() => {
-        try {
-          fitLiveViewport();
-          renderOverlayControls();
-          reflowActiveScreen();
-        } catch (e) {}
+        try { fitLiveViewport(); renderOverlayControls(); reflowActiveScreen(); } catch (e) {}
       }, 120);
     });
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", () => {
         clearTimeout(window._msVvT);
         window._msVvT = setTimeout(() => {
-          try {
-            fitLiveViewport();
-            reflowActiveScreen();
-          } catch (e) {}
+          try { fitLiveViewport(); reflowActiveScreen(); } catch (e) {}
         }, 50);
       });
     }
 
-    loadStore(); document.getElementById("top-meta").title = "Build " + MAT_SIDE_BUILD;
+    loadStore();
+    if (!store.gdriveFolder) store.gdriveFolder = "MatSide";
+    document.getElementById("top-meta").title = "Build " + MAT_SIDE_BUILD;
     if (store.gapiClientId) initGoogleClient();
     renderHome();
   </script>
