@@ -477,6 +477,29 @@
     }
 
     .toast { position: fixed; left: 50%; bottom: calc(24px + var(--safeBottom)); transform: translateX(-50%); background: var(--gold); color: var(--mat); font-weight: 800; font-size: 12px; padding: 10px 16px; border-radius: 99px; z-index: 50; display: none; white-space: nowrap; max-width: 90vw; }
+    .drive-modal {
+      position: fixed; inset: 0; z-index: 60;
+      background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .drive-modal-card {
+      width: 100%; max-width: 400px; max-height: 80vh;
+      overflow: auto;
+      background: var(--panel); border: 1px solid var(--panelLine);
+      border-radius: 12px; padding: 16px;
+    }
+    .drive-file-list { display: flex; flex-direction: column; gap: 6px; }
+    .drive-file-btn {
+      text-align: left; width: 100%;
+      padding: 12px 14px; border-radius: 8px;
+      border: 1px solid var(--panelLine); background: var(--mat);
+      color: var(--chalk); font-size: 13px; font-weight: 700;
+      cursor: pointer; font-family: inherit;
+    }
+    .drive-file-btn:active { opacity: 0.85; }
+    .drive-file-btn .df-name { font-weight: 800; }
+    .drive-file-btn .df-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-weight: 600; }
     .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--panelLine); font-size: 13px; }
     .stat-row:last-child { border-bottom: none; }
     .event-log { font-size: 12px; font-family: ui-monospace, monospace; line-height: 1.5; max-height: 240px; overflow-y: auto; background: var(--mat); border-radius: 8px; padding: 10px; margin-top: 8px; }
@@ -550,8 +573,12 @@
       </div>
 
       <div id="ae-import">
-        <p class="muted" style="margin-bottom:10px;">Import a Mat Scout / Strategic Wrestler event JSON (from your mapped Drive or local folder) to load the roster and dual.</p>
-        <input type="file" id="ae-sync-file" class="input" accept="application/json,.json" />
+        <p class="muted" style="margin-bottom:10px;">Import a Mat Scout / Strategic Wrestler event JSON to load the roster and dual.</p>
+        <div class="btn-row" style="margin-bottom:8px;">
+          <button type="button" class="btn btn-ghost" style="margin-top:0;" onclick="document.getElementById('ae-sync-file').click()">Device file</button>
+          <button type="button" class="btn btn-gold" style="margin-top:0;" onclick="openDriveImport('event')">Google Drive</button>
+        </div>
+        <input type="file" id="ae-sync-file" class="input" accept="application/json,.json" style="display:none;" />
         <div id="ae-import-status" class="muted"></div>
       </div>
 
@@ -756,8 +783,12 @@
 
       <div class="card">
         <div class="card-title">Team roster</div>
-        <p class="muted" style="margin-bottom:10px;">Import a Strategic Wrestler season export (from your mapped folder or device).</p>
-        <input type="file" id="admin-roster-file" class="input" accept="application/json,.json" />
+        <p class="muted" style="margin-bottom:10px;">Import a Strategic Wrestler season export from device or Google Drive.</p>
+        <div class="btn-row" style="margin-bottom:8px;">
+          <button type="button" class="btn btn-ghost" style="margin-top:0;" onclick="document.getElementById('admin-roster-file').click()">Device file</button>
+          <button type="button" class="btn btn-gold" style="margin-top:0;" onclick="openDriveImport('roster')">Google Drive</button>
+        </div>
+        <input type="file" id="admin-roster-file" class="input" accept="application/json,.json" style="display:none;" />
         <div id="admin-roster-status" class="muted"></div>
         <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearAdminRoster()">Clear roster</button>
       </div>
@@ -774,9 +805,15 @@
       </div>
       
       <div class="card">
-        <div class="card-title">Data</div>
+        <div class="card-title">Backup &amp; data</div>
         <p class="muted" id="admin-data-info" style="margin-bottom:10px;"></p>
-        <button type="button" class="btn btn-green" onclick="exportAllLocalData()">Export all local data (JSON)</button>
+        <p class="muted" style="margin-bottom:10px;">Full backup of events, roster, and settings (not videos). Use restore to load a backup on this or another device.</p>
+        <button type="button" class="btn btn-green" onclick="exportAllLocalData()">Download full backup (JSON)</button>
+        <div class="btn-row" style="margin-top:8px;">
+          <button type="button" class="btn btn-ghost" style="margin-top:0;" onclick="document.getElementById('admin-backup-file').click()">Restore · device</button>
+          <button type="button" class="btn btn-gold" style="margin-top:0;" onclick="openDriveImport('backup')">Restore · Drive</button>
+        </div>
+        <input type="file" id="admin-backup-file" class="input" accept="application/json,.json" style="display:none;" />
         <button type="button" class="btn btn-green" style="margin-top:8px;" onclick="exportAllVideos()">Export all stored videos</button>
         <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearAllEvents()">Clear all events</button>
         <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearStoredVideos()">Clear stored videos</button>
@@ -790,11 +827,22 @@
 
   <div class="toast" id="toast"></div>
 
+  <!-- Drive file picker modal -->
+  <div id="drive-import-modal" class="drive-modal" style="display:none;" onclick="if(event.target===this)closeDriveImport()">
+    <div class="drive-modal-card" onclick="event.stopPropagation()">
+      <div class="card-title" id="drive-import-title">Import from Google Drive</div>
+      <p class="muted" id="drive-import-hint" style="margin-bottom:10px;">JSON files in your MatSide folder</p>
+      <div id="drive-import-list" class="drive-file-list"></div>
+      <button type="button" class="btn btn-ghost" style="margin-top:12px;" onclick="closeDriveImport()">Cancel</button>
+    </div>
+  </div>
+
   <script>
     const MAT_SIDE_BUILD = "2026-09-26-sw-v27";
     const STORE_KEY = "sw-matside-v1";
     
-    const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+    // drive.file = create/upload; drive.readonly = list/import JSON from Drive
+    const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
     let tokenClient;
     let gapiInited = false;
 
@@ -1062,50 +1110,56 @@
       return { roster, bouts, teamName, seasonMeta };
     }
 
+    function importEventData(data) {
+      const parsed = parseMatScoutPayload(data);
+      if (parsed.teamName) store.teamName = parsed.teamName;
+      if (parsed.seasonMeta) store.seasonMeta = parsed.seasonMeta;
+      if (parsed.roster.length) store.roster = parsed.roster.filter(w => !w.quit);
+      let added = 0;
+      (parsed.bouts || []).forEach(b => {
+        if (store.events.some(ev => ev.id === b.id)) return;
+        const div = b.division || "Boys"; let r = (parsed.roster || []).filter(w => !w.quit);
+        if (div && div !== "Both") r = r.filter(w => w.division === div || !w.division);
+        r.sort((a, b) => (Number(a.weightClass) || 0) - (Number(b.weightClass) || 0));
+        const level = b.competitionLevel || "Varsity";
+        const weights = standardWeightsForDivision(div);
+        const matches = weights.map(w => {
+          const rw = r.find(x => String(x.weightClass || "") === w);
+          return { id: uid(), weightClass: w, wrestlerId: rw ? rw.id : null, wrestlerName: rw ? (rw.name || "") : "", opponent: "", level: (rw && rw.level) || level, status: "pending", ourPoints: 0, oppPoints: 0, events: [], package: null, isStandardSlot: true };
+        });
+        (b.opponentRoster || []).forEach(o => { const w = String(o.weightClass || ""); if (!w) return; const m = matches.find(x => x.weightClass === w); if (m && !m.opponent) m.opponent = o.name || ""; });
+        const style = (parsed.seasonMeta && parsed.seasonMeta.style) || b.style || "Folkstyle";
+        let boutType = b.type || b.eventType || b.meetType || "Dual";
+        if (/tourn/i.test(String(boutType))) boutType = "Tournament";
+        else if (/dual/i.test(String(boutType))) boutType = "Dual";
+        else if (!boutType) boutType = "Dual";
+        const oppTeam = b.opponentTeam || b.opponent || "";
+        const evName = b.name || b.eventName || ((boutType === "Tournament" ? "Tournament" : "Dual") + (oppTeam ? " vs " + oppTeam : ""));
+        store.events.push({
+          id: b.id || uid(),
+          name: evName,
+          date: b.date || new Date().toISOString().slice(0, 10),
+          division: div,
+          style,
+          opponentTeam: oppTeam,
+          level,
+          type: boutType,
+          roster: r.map(w => ({ id: w.id, name: w.name, weightClass: w.weightClass, level: w.level, division: w.division })),
+          opponentRoster: b.opponentRoster || [],
+          matches
+        });
+        added++;
+      });
+      saveStore();
+      toast(added ? "Events imported" : "No new events");
+      if (added) setTimeout(() => openEventList(), 600);
+      return added;
+    }
     document.getElementById("ae-sync-file").addEventListener("change", async (e) => {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       try {
-        const text = await file.text(); const data = JSON.parse(text); const parsed = parseMatScoutPayload(data);
-        if (parsed.teamName) store.teamName = parsed.teamName; if (parsed.seasonMeta) store.seasonMeta = parsed.seasonMeta;
-        if (parsed.roster.length) store.roster = parsed.roster.filter(w => !w.quit);
-        let added = 0;
-        (parsed.bouts || []).forEach(b => {
-          if (store.events.some(ev => ev.id === b.id)) return;
-          const div = b.division || "Boys"; let r = (parsed.roster || []).filter(w => !w.quit);
-          if (div && div !== "Both") r = r.filter(w => w.division === div || !w.division);
-          r.sort((a, b) => (Number(a.weightClass) || 0) - (Number(b.weightClass) || 0));
-          const level = b.competitionLevel || "Varsity";
-          const weights = standardWeightsForDivision(div);
-          const matches = weights.map(w => {
-            const rw = r.find(x => String(x.weightClass || "") === w);
-            return { id: uid(), weightClass: w, wrestlerId: rw ? rw.id : null, wrestlerName: rw ? (rw.name || "") : "", opponent: "", level: (rw && rw.level) || level, status: "pending", ourPoints: 0, oppPoints: 0, events: [], package: null, isStandardSlot: true };
-          });
-          (b.opponentRoster || []).forEach(o => { const w = String(o.weightClass || ""); if (!w) return; const m = matches.find(x => x.weightClass === w); if (m && !m.opponent) m.opponent = o.name || ""; });
-          const style = (parsed.seasonMeta && parsed.seasonMeta.style) || b.style || "Folkstyle";
-          // Strategic Wrestler bout type: Dual | Tournament (also accept eventType / meetType)
-          let boutType = b.type || b.eventType || b.meetType || "Dual";
-          if (/tourn/i.test(String(boutType))) boutType = "Tournament";
-          else if (/dual/i.test(String(boutType))) boutType = "Dual";
-          else if (!boutType) boutType = "Dual";
-          const oppTeam = b.opponentTeam || b.opponent || "";
-          const evName = b.name || b.eventName || ((boutType === "Tournament" ? "Tournament" : "Dual") + (oppTeam ? " vs " + oppTeam : ""));
-          store.events.push({
-            id: b.id || uid(),
-            name: evName,
-            date: b.date || new Date().toISOString().slice(0, 10),
-            division: div,
-            style,
-            opponentTeam: oppTeam,
-            level,
-            type: boutType,
-            roster: r.map(w => ({ id: w.id, name: w.name, weightClass: w.weightClass, level: w.level, division: w.division })),
-            opponentRoster: b.opponentRoster || [],
-            matches
-          });
-          added++;
-        });
-        saveStore(); toast(added ? "Events imported" : "No new events");
-        if (added) setTimeout(() => openEventList(), 600);
+        const text = await file.text();
+        importEventData(JSON.parse(text));
       } catch (err) { alert("Could not import: " + (err.message || err)); }
       e.target.value = "";
     });
@@ -2769,20 +2823,62 @@
 
     async function clearStoredVideos() { if (!confirm("Delete all videos stored in this browser? Score data is kept.")) return; await clearAllStoredVideos(); updateAdminUI(); toast("Stored videos cleared"); }
 
+    function importRosterData(data) {
+      const parsed = parseMatScoutPayload(data);
+      store.roster = (parsed.roster || []).filter(w => !w.quit);
+      if (parsed.teamName) store.teamName = parsed.teamName;
+      if (parsed.seasonMeta) store.seasonMeta = parsed.seasonMeta;
+      saveStore();
+      updateAdminUI();
+      toast("Roster imported (" + store.roster.length + ")");
+    }
+    function importBackupData(data) {
+      if (!data || (data.type !== "sw-matside-backup" && !data.store)) {
+        throw new Error("Not a MatSide backup file.");
+      }
+      const incoming = data.store || data;
+      if (!confirm("Restore this backup? Current events and roster on this device will be replaced.")) return false;
+      store = Object.assign(store, {
+        teamName: incoming.teamName || "",
+        roster: Array.isArray(incoming.roster) ? incoming.roster : [],
+        events: Array.isArray(incoming.events) ? incoming.events : [],
+        seasonMeta: incoming.seasonMeta || null,
+        gapiClientId: incoming.gapiClientId || store.gapiClientId || "",
+        gdriveFolder: incoming.gdriveFolder || store.gdriveFolder || "MatSide",
+        demoMode: !!incoming.demoMode
+      });
+      saveStore();
+      updateAdminUI();
+      toast("Backup restored");
+      return true;
+    }
     document.getElementById("admin-roster-file").addEventListener("change", async (e) => {
       const file = e.target.files && e.target.files[0]; if (!file) return;
       try {
-        const text = await file.text(); const data = JSON.parse(text); const parsed = parseMatScoutPayload(data);
-        store.roster = (parsed.roster || []).filter(w => !w.quit); if (parsed.teamName) store.teamName = parsed.teamName; if (parsed.seasonMeta) store.seasonMeta = parsed.seasonMeta;
-        saveStore(); updateAdminUI(); toast("Roster imported (" + store.roster.length + ")");
+        importRosterData(JSON.parse(await file.text()));
       } catch (err) { alert("Could not import: " + (err.message || err)); }
+      e.target.value = "";
+    });
+    document.getElementById("admin-backup-file").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0]; if (!file) return;
+      try {
+        importBackupData(JSON.parse(await file.text()));
+      } catch (err) { alert("Could not restore: " + (err.message || err)); }
       e.target.value = "";
     });
 
     function clearAdminRoster() { if (!confirm("Clear team roster?")) return; store.roster = []; saveStore(); updateAdminUI(); toast("Roster cleared"); }
-    function exportAllLocalData() {
+    async function exportAllLocalData() {
+      const name = "sw-matside-backup_" + new Date().toISOString().slice(0, 10) + ".json";
       const blob = new Blob([JSON.stringify({ type: "sw-matside-backup", version: 1, exportedAt: new Date().toISOString(), store }, null, 2)], { type: "application/json" });
-      downloadBlob(blob, "sw-matside-backup_" + new Date().toISOString().slice(0, 10) + ".json"); toast("Backup downloaded");
+      if (isDriveConnected()) {
+        toast("Saving backup to Drive…");
+        const ok = await uploadToDrive(blob, name, "application/json", null);
+        if (ok) { toast("Backup saved to Google Drive / " + (store.gdriveFolder || "MatSide")); return; }
+        toast("Drive save failed — downloading instead");
+      }
+      downloadBlob(blob, name);
+      toast("Backup downloaded");
     }
     function clearAllEvents() { if (!confirm("Delete all events and match scores? Roster is kept.")) return; store.events = []; saveStore(); updateAdminUI(); toast("Events cleared"); }
 
@@ -2971,6 +3067,105 @@
       }
       if (success) toast("Saved to Google Drive / " + (store.gdriveFolder || "MatSide"));
       else alert("Upload failed. Check console and Drive auth.");
+    }
+
+    // ─── Drive import picker ────────────────────────────────────────
+    let driveImportMode = null; // 'roster' | 'event' | 'backup'
+    async function listDriveJsonFiles() {
+      const token = getDriveAccessToken();
+      if (!token) return [];
+      const folderId = await ensureDriveFolder(null);
+      const files = [];
+      async function query(q) {
+        const url = "https://www.googleapis.com/drive/v3/files?pageSize=50&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime,size,mimeType)&q=" + encodeURIComponent(q);
+        const res = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+        const data = await res.json();
+        return data.files || [];
+      }
+      try {
+        // Prefer files inside the mapped MatSide folder
+        if (folderId) {
+          const inFolder = await query(`'${folderId}' in parents and trashed=false and (mimeType='application/json' or name contains '.json')`);
+          files.push(...inFolder);
+        }
+        // Also surface recent JSON backups / SW exports the user can access
+        const extras = await query(`trashed=false and (name contains 'sw-matside-backup' or name contains 'mat-side' or name contains 'strategic') and (mimeType='application/json' or name contains '.json')`);
+        const seen = new Set(files.map(f => f.id));
+        extras.forEach(f => { if (!seen.has(f.id)) files.push(f); });
+      } catch (e) {
+        console.error(e);
+      }
+      return files;
+    }
+    async function downloadDriveFileText(fileId) {
+      const token = getDriveAccessToken();
+      if (!token) throw new Error("Not authorized");
+      const res = await fetch("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(fileId) + "?alt=media", {
+        headers: { Authorization: "Bearer " + token }
+      });
+      if (!res.ok) throw new Error("Download failed (" + res.status + ")");
+      return await res.text();
+    }
+    function closeDriveImport() {
+      driveImportMode = null;
+      const modal = document.getElementById("drive-import-modal");
+      if (modal) modal.style.display = "none";
+    }
+    async function openDriveImport(mode) {
+      if (!isDriveConnected()) {
+        alert("Authorize Google Drive in Admin first, then try again.");
+        return;
+      }
+      driveImportMode = mode;
+      const modal = document.getElementById("drive-import-modal");
+      const title = document.getElementById("drive-import-title");
+      const hint = document.getElementById("drive-import-hint");
+      const list = document.getElementById("drive-import-list");
+      if (!modal || !list) return;
+      const labels = {
+        roster: "Import roster from Drive",
+        event: "Import event JSON from Drive",
+        backup: "Restore backup from Drive"
+      };
+      if (title) title.textContent = labels[mode] || "Import from Google Drive";
+      if (hint) hint.textContent = "Looking in Drive / " + (store.gdriveFolder || "MatSide") + " …";
+      list.innerHTML = `<p class="muted">Loading…</p>`;
+      modal.style.display = "flex";
+      try {
+        const files = await listDriveJsonFiles();
+        if (!files.length) {
+          list.innerHTML = `<p class="muted">No JSON files found in <strong>${escHtml(store.gdriveFolder || "MatSide")}</strong>. Upload a file there, or use Device file.</p>`;
+          if (hint) hint.textContent = "No matching files";
+          return;
+        }
+        if (hint) hint.textContent = files.length + " file(s) · tap to import";
+        list.innerHTML = files.map(f => {
+          const when = f.modifiedTime ? new Date(f.modifiedTime).toLocaleString() : "";
+          const size = f.size ? (Number(f.size) / 1024).toFixed(1) + " KB" : "";
+          return `<button type="button" class="drive-file-btn" onclick="pickDriveImportFile('${escHtml(f.id)}')">
+            <div class="df-name">${escHtml(f.name || "file.json")}</div>
+            <div class="df-meta">${escHtml([when, size].filter(Boolean).join(" · "))}</div>
+          </button>`;
+        }).join("");
+      } catch (e) {
+        console.error(e);
+        list.innerHTML = `<p class="muted">Could not list Drive files. Re-authorize in Admin and try again.</p>`;
+      }
+    }
+    async function pickDriveImportFile(fileId) {
+      if (!driveImportMode || !fileId) return;
+      const mode = driveImportMode;
+      try {
+        toast("Downloading…");
+        const text = await downloadDriveFileText(fileId);
+        const data = JSON.parse(text);
+        closeDriveImport();
+        if (mode === "roster") importRosterData(data);
+        else if (mode === "event") importEventData(data);
+        else if (mode === "backup") importBackupData(data);
+      } catch (err) {
+        alert("Could not import from Drive: " + (err.message || err));
+      }
     }
 
     // ─── Boot ───────────────────────────────────────────────────────
