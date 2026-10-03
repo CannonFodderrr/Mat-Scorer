@@ -1,4 +1,4 @@
- https://cannonfodderrr.github.io/Mat-Side/
+ https://cannonfodderrr.github.io/Mat-Scorer/
 
 MatSide is Companion App to Strategic Wrestler (MatScout)
 
