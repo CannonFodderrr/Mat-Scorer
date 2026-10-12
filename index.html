@@ -463,8 +463,50 @@
     .utb-card .utb-actions .btn { margin-top: 0; }
 
     .score-center-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 0 auto; }
-    .score-right-col { width: 75%; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .score-left-col {
+      width: 75%; justify-self: start;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+    }
+    .score-left-col .score-pill { width: 100%; }
+    .score-right-col {
+      width: 75%; justify-self: end;
+      display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    }
     .score-right-col .score-pill { width: 100%; }
+    .score-left-col .zoom-btn,
+    .score-right-col .zoom-btn {
+      width: 100%;
+      max-width: 100%;
+      min-height: var(--live-chip-h, 36px);
+      height: var(--live-chip-h, 36px);
+      font-size: calc(var(--live-btn-fs, 12px) + 6px);
+      font-weight: 900;
+      line-height: 1;
+      color: var(--gold);
+      border-color: rgba(217,164,65,0.65);
+      background: rgba(0,0,0,0.72);
+      padding: 0 8px;
+    }
+    .score-left-col .zoom-btn { align-self: stretch; }
+    .score-right-col .zoom-btn { align-self: stretch; }
+    .score-right-col .end-btn {
+      width: 100%;
+      min-height: var(--live-chip-h, 36px);
+      height: var(--live-chip-h, 36px);
+      font-size: var(--live-btn-fs, 12px);
+    }
+    .zoom-level-chip {
+      margin-top: 2px;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--gold);
+      text-align: center;
+      opacity: 0.95;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.85);
+      font-variant-numeric: tabular-nums;
+    }
+    /* Old floating bar kept out of the way if present */
+    .live-zoom-bar { display: none !important; }
 
     .live-spacer { flex: 1; min-height: 8px; pointer-events: none; }
     .live-bottom { padding: 4px 6px calc(6px + var(--safeBottom)); }
@@ -735,11 +777,6 @@
     <div class="video-wrap" id="live-video-wrap">
       <video id="live-video" playsinline webkit-playsinline muted autoplay></video>
     </div>
-    <div class="live-zoom-bar" id="live-zoom-bar" aria-label="Camera zoom">
-      <button type="button" id="zoom-out-btn" onclick="event.stopPropagation(); nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
-      <span class="zoom-label" id="zoom-level-label">1.0×</span>
-      <button type="button" id="zoom-in-btn" onclick="event.stopPropagation(); nudgeCameraZoom(0.25)" title="Zoom in">+</button>
-    </div>
     <div class="live-start-overlay" id="live-start-overlay">
       <div class="live-start-card">
         <div class="start-title">Ready</div>
@@ -749,16 +786,20 @@
     </div>
     <div class="live-overlay">
       <div class="score-strip">
-        <div class="score-pill our">
-          <div class="score-pill-main">
-            <div class="lab" id="live-our-name">Us</div>
-            <div class="num" id="live-our-pts">0</div>
+        <div class="score-left-col">
+          <div class="score-pill our">
+            <div class="score-pill-main">
+              <div class="lab" id="live-our-name">Us</div>
+              <div class="num" id="live-our-pts">0</div>
+            </div>
+            <button type="button" class="inj-choice-btn" id="inj-choice-our" onclick="openInjChoice('our')" title="Injury choice — our wrestler">Inj Choice</button>
           </div>
-          <button type="button" class="inj-choice-btn" id="inj-choice-our" onclick="openInjChoice('our')" title="Injury choice — our wrestler">Inj Choice</button>
+          <button type="button" class="live-chip zoom-btn" id="zoom-out-btn" onclick="event.stopPropagation(); nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
         </div>
         <div class="score-center-col">
           <button type="button" class="live-chip period" id="period-btn" onclick="cyclePeriod()">P1</button>
           <div class="pos-label pos-neutral" id="pos-label">Neutral</div>
+          <div class="zoom-level-chip" id="zoom-level-label">1.0×</div>
         </div>
         <div class="score-right-col">
           <div class="score-pill opp">
@@ -769,6 +810,7 @@
             <button type="button" class="inj-choice-btn" id="inj-choice-opp" onclick="openInjChoice('opp')" title="Injury choice — opponent">Inj Choice</button>
           </div>
           <button type="button" class="live-chip end-btn" onclick="endLiveMatch()">End Match</button>
+          <button type="button" class="live-chip zoom-btn" id="zoom-in-btn" onclick="event.stopPropagation(); nudgeCameraZoom(0.25)" title="Zoom in">+</button>
         </div>
       </div>
       <div class="utb-modal" id="utb-modal">
@@ -1852,61 +1894,13 @@
     }
 
     function ensureZoomBarMounted(onLive) {
-      let bar = document.getElementById("live-zoom-bar");
-      if (!bar) return null;
-      // Park on document.body so fullscreen / overflow / stacking never hides it
-      if (onLive) {
-        if (bar.parentElement !== document.body) {
-          document.body.appendChild(bar);
-        }
-        bar.style.cssText = [
-          "position:fixed",
-          "right:12px",
-          "top:38%",
-          "z-index:2147483646",
-          "display:flex",
-          "flex-direction:column",
-          "align-items:center",
-          "gap:10px",
-          "padding:10px 8px",
-          "border-radius:16px",
-          "background:rgba(0,0,0,0.9)",
-          "border:2px solid #d9a441",
-          "box-shadow:0 4px 24px rgba(0,0,0,0.7)",
-          "pointer-events:auto",
-          "visibility:visible",
-          "opacity:1"
-        ].join(";");
-        bar.classList.remove("hidden");
-        bar.removeAttribute("hidden");
-        bar.querySelectorAll("button").forEach(function (btn) {
-          btn.style.cssText = "width:52px;height:52px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);background:#1c1f1e;color:#f2f4f3;font-size:30px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;margin:0;pointer-events:auto;cursor:pointer;";
-        });
-        var lab = bar.querySelector(".zoom-label");
-        if (lab) lab.style.cssText = "color:#d9a441;font-size:14px;font-weight:900;min-width:52px;text-align:center;";
-      } else {
-        bar.style.display = "none";
-        // return under screen-live for tidy DOM
-        const live = document.getElementById("screen-live");
-        if (live && bar.parentElement === document.body) {
-          const startOv = document.getElementById("live-start-overlay");
-          if (startOv) live.insertBefore(bar, startOv);
-          else live.appendChild(bar);
-        }
-      }
-      return bar;
+      // Zoom controls live in the score strip; no floating bar.
+      return null;
     }
 
     function updateZoomUI() {
       const label = document.getElementById("zoom-level-label");
-      const bar = ensureZoomBarMounted(!!(document.body && document.body.classList.contains("live-active")));
       if (label) label.textContent = (Math.round(cameraZoom * 10) / 10).toFixed(1) + "×";
-      if (bar && document.body.classList.contains("live-active")) {
-        bar.style.display = "flex";
-        bar.style.visibility = "visible";
-        bar.style.opacity = "1";
-        bar.classList.remove("hidden");
-      }
     }
 
     function bindCameraPinchZoom() {
