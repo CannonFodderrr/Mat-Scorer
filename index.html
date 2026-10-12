@@ -184,13 +184,20 @@
       will-change: transform;
     }
     .live-zoom-bar {
-      position: absolute; right: max(8px, env(safe-area-inset-right, 0px));
-      top: 50%; transform: translateY(-50%);
-      z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      position: absolute;
+      right: max(6px, env(safe-area-inset-right, 0px));
+      top: 42%;
+      transform: translateY(-50%);
+      z-index: 40; /* above live-overlay (2) and start overlay (5) */
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
       padding: 8px 6px; border-radius: 14px;
-      background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.82); border: 2px solid var(--gold);
       backdrop-filter: blur(8px); pointer-events: auto;
+      -webkit-user-select: none; user-select: none;
     }
+    /* Visible whenever live screen is shown; JS only hides if no camera path */
+    #screen-live:not(.active) .live-zoom-bar { display: none !important; }
+    #screen-live.active .live-zoom-bar:not(.hidden) { display: flex !important; }
     .live-zoom-bar button {
       width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.25);
       background: rgba(28,31,30,0.9); color: var(--chalk); font-size: 22px; font-weight: 800;
@@ -690,11 +697,11 @@
   <div id="screen-live">
     <div class="video-wrap" id="live-video-wrap">
       <video id="live-video" playsinline webkit-playsinline muted autoplay></video>
-      <div class="live-zoom-bar" id="live-zoom-bar" aria-label="Camera zoom">
-        <button type="button" id="zoom-out-btn" onclick="nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
-        <span class="zoom-label" id="zoom-level-label">1.0×</span>
-        <button type="button" id="zoom-in-btn" onclick="nudgeCameraZoom(0.25)" title="Zoom in">+</button>
-      </div>
+    </div>
+    <div class="live-zoom-bar" id="live-zoom-bar" aria-label="Camera zoom">
+      <button type="button" id="zoom-out-btn" onclick="event.stopPropagation(); nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
+      <span class="zoom-label" id="zoom-level-label">1.0×</span>
+      <button type="button" id="zoom-in-btn" onclick="event.stopPropagation(); nudgeCameraZoom(0.25)" title="Zoom in">+</button>
     </div>
     <div class="live-start-overlay" id="live-start-overlay">
       <div class="live-start-card">
@@ -1795,7 +1802,12 @@
     }
 
     function nudgeCameraZoom(delta) {
-      if (!cameraZoomSupported) return;
+      if (!cameraZoomSupported) {
+        // Enable CSS zoom on demand if camera already running
+        if (mediaStream || document.getElementById("live-video")) {
+          cameraZoomMin = 1; cameraZoomMax = 4; cameraZoomSupported = true; cameraZoomMode = cameraZoomMode === "track" ? "track" : "css";
+        } else return;
+      }
       const step = Number(delta) || 0;
       applyCameraZoom(cameraZoom + step);
     }
@@ -1804,18 +1816,20 @@
       const label = document.getElementById("zoom-level-label");
       const bar = document.getElementById("live-zoom-bar");
       if (label) {
-        const shown = cameraZoomMode === "track"
-          ? (cameraZoomMin <= 1 && cameraZoom <= 8 ? cameraZoom : cameraZoom)
-          : cameraZoom;
-        label.textContent = (Math.round(shown * 10) / 10).toFixed(1) + "×";
+        label.textContent = (Math.round(cameraZoom * 10) / 10).toFixed(1) + "×";
       }
-      if (bar) bar.classList.toggle("hidden", !cameraZoomSupported);
+      // Always show on live screen once camera path has run (css fallback always available)
+      if (bar) {
+        const liveOn = document.getElementById("screen-live") && document.getElementById("screen-live").classList.contains("active");
+        bar.classList.toggle("hidden", !(liveOn && cameraZoomSupported));
+        bar.style.display = (liveOn && cameraZoomSupported) ? "flex" : "";
+      }
     }
 
     function bindCameraPinchZoom() {
-      const wrap = document.getElementById("live-video-wrap") || document.querySelector(".video-wrap");
-      if (!wrap || wrap._zoomBound) return;
-      wrap._zoomBound = true;
+      const root = document.getElementById("screen-live");
+      if (!root || root._zoomBound) return;
+      root._zoomBound = true;
 
       function dist(touches) {
         if (!touches || touches.length < 2) return 0;
@@ -1824,14 +1838,15 @@
         return Math.sqrt(dx * dx + dy * dy);
       }
 
-      wrap.addEventListener("touchstart", function (e) {
+      root.addEventListener("touchstart", function (e) {
         if (!cameraZoomSupported || !e.touches || e.touches.length !== 2) return;
+        // Allow pinch anywhere on live screen except when clearly on a single-button control
         e.preventDefault();
         cameraPinchStartDist = dist(e.touches);
         cameraPinchStartZoom = cameraZoom;
       }, { passive: false });
 
-      wrap.addEventListener("touchmove", function (e) {
+      root.addEventListener("touchmove", function (e) {
         if (!cameraZoomSupported || !e.touches || e.touches.length !== 2 || !cameraPinchStartDist) return;
         e.preventDefault();
         const d = dist(e.touches);
@@ -1840,10 +1855,10 @@
         applyCameraZoom(cameraPinchStartZoom * ratio);
       }, { passive: false });
 
-      wrap.addEventListener("touchend", function () {
-        cameraPinchStartDist = 0;
+      root.addEventListener("touchend", function (e) {
+        if (!e.touches || e.touches.length < 2) cameraPinchStartDist = 0;
       });
-      wrap.addEventListener("touchcancel", function () {
+      root.addEventListener("touchcancel", function () {
         cameraPinchStartDist = 0;
       });
     }
@@ -1878,6 +1893,8 @@
         showScreen("screen-live");
         fitLiveViewport();
         const stream = await getCameraStream();
+        try { initCameraZoomFromStream(stream); } catch (e) { console.warn(e); }
+        try { updateZoomUI(); } catch (e) {}
 
         const liveVid = document.getElementById("live-video");
         liveVid.setAttribute("playsinline", ""); liveVid.setAttribute("webkit-playsinline", "");
