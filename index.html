@@ -177,11 +177,32 @@
       height: 100%; height: 100dvh; height: 100svh;
       overflow: hidden;
     }
-    .video-wrap { position: absolute; inset: 0; background: #000; z-index: 0; overflow: hidden; }
+    .video-wrap { position: absolute; inset: 0; background: #000; z-index: 0; overflow: hidden; touch-action: none; }
     .video-wrap video {
       width: 100%; height: 100%; object-fit: cover; object-position: center;
-      display: block; background: #111; transform: translateZ(0);
+      display: block; background: #111; transform-origin: center center;
+      will-change: transform;
     }
+    .live-zoom-bar {
+      position: absolute; right: max(8px, env(safe-area-inset-right, 0px));
+      top: 50%; transform: translateY(-50%);
+      z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding: 8px 6px; border-radius: 14px;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(8px); pointer-events: auto;
+    }
+    .live-zoom-bar button {
+      width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(28,31,30,0.9); color: var(--chalk); font-size: 22px; font-weight: 800;
+      line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      padding: 0; -webkit-user-select: none; user-select: none;
+    }
+    .live-zoom-bar button:active { background: var(--goldDim); color: var(--gold); border-color: var(--gold); }
+    .live-zoom-bar .zoom-label {
+      min-width: 48px; text-align: center; font-size: 12px; font-weight: 800;
+      color: var(--gold); font-variant-numeric: tabular-nums;
+    }
+    .live-zoom-bar.hidden { display: none; }
     .live-overlay {
       position: absolute; inset: 0; z-index: 2;
       display: flex; flex-direction: column;
@@ -667,8 +688,13 @@
 
   <!-- LIVE -->
   <div id="screen-live">
-    <div class="video-wrap">
+    <div class="video-wrap" id="live-video-wrap">
       <video id="live-video" playsinline webkit-playsinline muted autoplay></video>
+      <div class="live-zoom-bar" id="live-zoom-bar" aria-label="Camera zoom">
+        <button type="button" id="zoom-out-btn" onclick="nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
+        <span class="zoom-label" id="zoom-level-label">1.0×</span>
+        <button type="button" id="zoom-in-btn" onclick="nudgeCameraZoom(0.25)" title="Zoom in">+</button>
+      </div>
     </div>
     <div class="live-start-overlay" id="live-start-overlay">
       <div class="live-start-card">
@@ -840,6 +866,13 @@
     let eventImportSource = "local"; // 'local' | 'drive'
 
     let mediaStream = null;
+    let cameraZoom = 1;
+    let cameraZoomMin = 1;
+    let cameraZoomMax = 1;
+    let cameraZoomSupported = false;
+    let cameraZoomMode = "none"; // "track" | "css" | "none"
+    let cameraPinchStartDist = 0;
+    let cameraPinchStartZoom = 1;
     let mediaRecorder = null;
     let recordedChunks = [];
     let recording = false;
@@ -975,7 +1008,7 @@
 
     function goHome() {
       try {
-        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; } try { resetCameraZoom(); } catch (e) {}
       } catch (e) {}
       matchAwaitingStart = false;
       setStartOverlayVisible(false);
@@ -1676,11 +1709,154 @@
 
     // ─── LIVE SCORING ───────────────────────────────────────────────
     async function getCameraStream() {
-      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; } try { resetCameraZoom(); } catch (e) {}
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("Camera API not available.");
-      const attempts = [{ audio: true, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } }, { audio: true, video: { facingMode: "environment" } }, { audio: true, video: true }, { audio: false, video: { facingMode: "environment" } }, { audio: false, video: true }];
-      let lastErr = null; for (const constraints of attempts) { try { mediaStream = await navigator.mediaDevices.getUserMedia(constraints); return mediaStream; } catch (e) { lastErr = e; } }
+      const attempts = [
+        { audio: true, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
+        { audio: true, video: { facingMode: "environment" } },
+        { audio: true, video: true },
+        { audio: false, video: { facingMode: "environment" } },
+        { audio: false, video: true }
+      ];
+      let lastErr = null;
+      for (const constraints of attempts) {
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+          initCameraZoomFromStream(mediaStream);
+          return mediaStream;
+        } catch (e) { lastErr = e; }
+      }
       throw lastErr || new Error("Could not open camera");
+    }
+
+    function getLiveVideoTrack() {
+      try {
+        if (!mediaStream) return null;
+        const tracks = mediaStream.getVideoTracks();
+        return tracks && tracks[0] ? tracks[0] : null;
+      } catch (e) { return null; }
+    }
+
+    function initCameraZoomFromStream(stream) {
+      cameraZoom = 1;
+      cameraZoomMin = 1;
+      cameraZoomMax = 1;
+      cameraZoomSupported = false;
+      cameraZoomMode = "none";
+      const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+      if (track && typeof track.getCapabilities === "function") {
+        try {
+          const caps = track.getCapabilities() || {};
+          if (caps.zoom && typeof caps.zoom.min === "number" && typeof caps.zoom.max === "number" && caps.zoom.max > caps.zoom.min) {
+            cameraZoomMin = caps.zoom.min;
+            cameraZoomMax = caps.zoom.max;
+            cameraZoomSupported = true;
+            cameraZoomMode = "track";
+            let settingsZoom = 1;
+            try {
+              const s = track.getSettings && track.getSettings();
+              if (s && typeof s.zoom === "number") settingsZoom = s.zoom;
+            } catch (e) {}
+            cameraZoom = Math.max(cameraZoomMin, Math.min(cameraZoomMax, settingsZoom || cameraZoomMin));
+          }
+        } catch (e) { console.warn("zoom capabilities", e); }
+      }
+      // Fallback: CSS digital zoom on the preview (recording stays full frame on devices without track zoom)
+      if (!cameraZoomSupported) {
+        cameraZoomMin = 1;
+        cameraZoomMax = 4;
+        cameraZoom = 1;
+        cameraZoomSupported = true;
+        cameraZoomMode = "css";
+      }
+      applyCameraZoom(cameraZoom);
+      updateZoomUI();
+      bindCameraPinchZoom();
+    }
+
+    function applyCameraZoom(level) {
+      const z = Math.max(cameraZoomMin, Math.min(cameraZoomMax, Number(level) || cameraZoomMin));
+      cameraZoom = z;
+      if (cameraZoomMode === "track") {
+        const track = getLiveVideoTrack();
+        if (track && typeof track.applyConstraints === "function") {
+          track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function (e) {
+            console.warn("apply zoom", e);
+          });
+        }
+        // Keep preview upright even when track handles zoom
+        const vid = document.getElementById("live-video");
+        if (vid) vid.style.transform = "translateZ(0)";
+      } else if (cameraZoomMode === "css") {
+        const vid = document.getElementById("live-video");
+        if (vid) vid.style.transform = "scale(" + z + ") translateZ(0)";
+      }
+      updateZoomUI();
+    }
+
+    function nudgeCameraZoom(delta) {
+      if (!cameraZoomSupported) return;
+      const step = Number(delta) || 0;
+      applyCameraZoom(cameraZoom + step);
+    }
+
+    function updateZoomUI() {
+      const label = document.getElementById("zoom-level-label");
+      const bar = document.getElementById("live-zoom-bar");
+      if (label) {
+        const shown = cameraZoomMode === "track"
+          ? (cameraZoomMin <= 1 && cameraZoom <= 8 ? cameraZoom : cameraZoom)
+          : cameraZoom;
+        label.textContent = (Math.round(shown * 10) / 10).toFixed(1) + "×";
+      }
+      if (bar) bar.classList.toggle("hidden", !cameraZoomSupported);
+    }
+
+    function bindCameraPinchZoom() {
+      const wrap = document.getElementById("live-video-wrap") || document.querySelector(".video-wrap");
+      if (!wrap || wrap._zoomBound) return;
+      wrap._zoomBound = true;
+
+      function dist(touches) {
+        if (!touches || touches.length < 2) return 0;
+        const a = touches[0], b = touches[1];
+        const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+
+      wrap.addEventListener("touchstart", function (e) {
+        if (!cameraZoomSupported || !e.touches || e.touches.length !== 2) return;
+        e.preventDefault();
+        cameraPinchStartDist = dist(e.touches);
+        cameraPinchStartZoom = cameraZoom;
+      }, { passive: false });
+
+      wrap.addEventListener("touchmove", function (e) {
+        if (!cameraZoomSupported || !e.touches || e.touches.length !== 2 || !cameraPinchStartDist) return;
+        e.preventDefault();
+        const d = dist(e.touches);
+        if (d <= 0) return;
+        const ratio = d / cameraPinchStartDist;
+        applyCameraZoom(cameraPinchStartZoom * ratio);
+      }, { passive: false });
+
+      wrap.addEventListener("touchend", function () {
+        cameraPinchStartDist = 0;
+      });
+      wrap.addEventListener("touchcancel", function () {
+        cameraPinchStartDist = 0;
+      });
+    }
+
+    function resetCameraZoom() {
+      cameraZoom = 1;
+      cameraZoomMin = 1;
+      cameraZoomMax = 1;
+      cameraZoomSupported = false;
+      cameraZoomMode = "none";
+      const vid = document.getElementById("live-video");
+      if (vid) vid.style.transform = "translateZ(0)";
+      updateZoomUI();
     }
 
     function pickMimeType() {
@@ -2667,7 +2843,7 @@
         return;
       }
       clearInterval(recTimer); const videoBlob = await stopRecorder(); recording = false; matchAwaitingStart = false; setStartOverlayVisible(false);
-      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; } try { resetCameraZoom(); } catch (e) {}
 
       const packageId = uid();
       const dateStr = live.boutMeta && live.boutMeta.date ? live.boutMeta.date : new Date().toISOString().slice(0, 10);
