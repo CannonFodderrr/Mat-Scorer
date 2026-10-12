@@ -184,32 +184,69 @@
       will-change: transform;
     }
     .live-zoom-bar {
-      position: absolute;
-      right: max(6px, env(safe-area-inset-right, 0px));
-      top: 42%;
-      transform: translateY(-50%);
-      z-index: 40; /* above live-overlay (2) and start overlay (5) */
-      display: flex; flex-direction: column; align-items: center; gap: 8px;
-      padding: 8px 6px; border-radius: 14px;
-      background: rgba(0,0,0,0.82); border: 2px solid var(--gold);
-      backdrop-filter: blur(8px); pointer-events: auto;
-      -webkit-user-select: none; user-select: none;
+      position: fixed !important;
+      right: max(10px, env(safe-area-inset-right, 0px)) !important;
+      top: 38% !important;
+      bottom: auto !important;
+      left: auto !important;
+      transform: none !important;
+      z-index: 10050 !important;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 8px;
+      border-radius: 16px;
+      background: rgba(0,0,0,0.88) !important;
+      border: 2px solid #d9a441 !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      pointer-events: auto !important;
+      -webkit-user-select: none;
+      user-select: none;
     }
-    /* Visible whenever live screen is shown; JS only hides if no camera path */
-    #screen-live:not(.active) .live-zoom-bar { display: none !important; }
-    #screen-live.active .live-zoom-bar:not(.hidden) { display: flex !important; }
+    body.live-active .live-zoom-bar,
+    #screen-live.active .live-zoom-bar {
+      display: flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
     .live-zoom-bar button {
-      width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.25);
-      background: rgba(28,31,30,0.9); color: var(--chalk); font-size: 22px; font-weight: 800;
-      line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
-      padding: 0; -webkit-user-select: none; user-select: none;
+      width: 48px !important;
+      height: 48px !important;
+      min-width: 48px;
+      min-height: 48px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.35) !important;
+      background: #1c1f1e !important;
+      color: #f2f4f3 !important;
+      font-size: 28px !important;
+      font-weight: 900 !important;
+      line-height: 1 !important;
+      cursor: pointer;
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      padding: 0 !important;
+      margin: 0 !important;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      pointer-events: auto !important;
     }
-    .live-zoom-bar button:active { background: var(--goldDim); color: var(--gold); border-color: var(--gold); }
+    .live-zoom-bar button:active {
+      background: #4a3b1d !important;
+      color: #d9a441 !important;
+      border-color: #d9a441 !important;
+    }
     .live-zoom-bar .zoom-label {
-      min-width: 48px; text-align: center; font-size: 12px; font-weight: 800;
-      color: var(--gold); font-variant-numeric: tabular-nums;
+      min-width: 52px;
+      text-align: center;
+      font-size: 14px !important;
+      font-weight: 900 !important;
+      color: #d9a441 !important;
+      font-variant-numeric: tabular-nums;
+      pointer-events: none;
     }
-    .live-zoom-bar.hidden { display: none; }
+
     .live-overlay {
       position: absolute; inset: 0; z-index: 2;
       display: flex; flex-direction: column;
@@ -980,6 +1017,17 @@
       document.querySelectorAll(".screen, #screen-live").forEach(el => el.classList.remove("active"));
       const el = document.getElementById(id); if (el) el.classList.add("active");
       const isLive = id === "screen-live"; document.body.classList.toggle("live-active", isLive);
+      if (isLive) {
+        try {
+          cameraZoomSupported = true;
+          if (!cameraZoomMode || cameraZoomMode === "none") { cameraZoomMode = "css"; cameraZoomMin = 1; cameraZoomMax = 4; }
+          ensureZoomBarMounted(true);
+          updateZoomUI();
+          bindCameraPinchZoom();
+        } catch (e) {}
+      } else {
+        try { ensureZoomBarMounted(false); } catch (e) {}
+      }
       const bar = document.getElementById("topbar"); if (bar) bar.style.display = (isLive || id === "screen-home") ? "none" : "";
       if (!isLive) exitLiveFullscreen();
       updateTopbar(id);
@@ -1745,84 +1793,119 @@
     }
 
     function initCameraZoomFromStream(stream) {
-      cameraZoom = 1;
       cameraZoomMin = 1;
-      cameraZoomMax = 1;
-      cameraZoomSupported = false;
-      cameraZoomMode = "none";
+      cameraZoomMax = 4;
+      cameraZoomSupported = true;
+      cameraZoomMode = "css";
+      cameraZoom = 1;
+
       const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
       if (track && typeof track.getCapabilities === "function") {
         try {
           const caps = track.getCapabilities() || {};
           if (caps.zoom && typeof caps.zoom.min === "number" && typeof caps.zoom.max === "number" && caps.zoom.max > caps.zoom.min) {
-            cameraZoomMin = caps.zoom.min;
-            cameraZoomMax = caps.zoom.max;
-            cameraZoomSupported = true;
+            cameraZoomMin = Number(caps.zoom.min) || 1;
+            cameraZoomMax = Number(caps.zoom.max) || 4;
             cameraZoomMode = "track";
-            let settingsZoom = 1;
             try {
               const s = track.getSettings && track.getSettings();
-              if (s && typeof s.zoom === "number") settingsZoom = s.zoom;
+              if (s && typeof s.zoom === "number") cameraZoom = s.zoom;
             } catch (e) {}
-            cameraZoom = Math.max(cameraZoomMin, Math.min(cameraZoomMax, settingsZoom || cameraZoomMin));
+            cameraZoom = Math.max(cameraZoomMin, Math.min(cameraZoomMax, cameraZoom || cameraZoomMin));
           }
         } catch (e) { console.warn("zoom capabilities", e); }
-      }
-      // Fallback: CSS digital zoom on the preview (recording stays full frame on devices without track zoom)
-      if (!cameraZoomSupported) {
-        cameraZoomMin = 1;
-        cameraZoomMax = 4;
-        cameraZoom = 1;
-        cameraZoomSupported = true;
-        cameraZoomMode = "css";
       }
       applyCameraZoom(cameraZoom);
       updateZoomUI();
       bindCameraPinchZoom();
     }
 
-    function applyCameraZoom(level) {
+        function applyCameraZoom(level) {
       const z = Math.max(cameraZoomMin, Math.min(cameraZoomMax, Number(level) || cameraZoomMin));
       cameraZoom = z;
+      const vid = document.getElementById("live-video");
       if (cameraZoomMode === "track") {
         const track = getLiveVideoTrack();
         if (track && typeof track.applyConstraints === "function") {
-          track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function (e) {
-            console.warn("apply zoom", e);
-          });
+          track.applyConstraints({ advanced: [{ zoom: z }] }).catch(function () {});
         }
-        // Keep preview upright even when track handles zoom
-        const vid = document.getElementById("live-video");
-        if (vid) vid.style.transform = "translateZ(0)";
-      } else if (cameraZoomMode === "css") {
-        const vid = document.getElementById("live-video");
-        if (vid) vid.style.transform = "scale(" + z + ") translateZ(0)";
+        // Small CSS assist so user always sees change even if track zoom is slow
+        if (vid) {
+          const base = cameraZoomMin > 0 ? (z / cameraZoomMin) : z;
+          const cssScale = Math.max(1, Math.min(3, base));
+          vid.style.transform = "scale(" + cssScale + ")";
+        }
+      } else {
+        if (vid) vid.style.transform = "scale(" + z + ")";
       }
       updateZoomUI();
     }
 
     function nudgeCameraZoom(delta) {
-      if (!cameraZoomSupported) {
-        // Enable CSS zoom on demand if camera already running
-        if (mediaStream || document.getElementById("live-video")) {
-          cameraZoomMin = 1; cameraZoomMax = 4; cameraZoomSupported = true; cameraZoomMode = cameraZoomMode === "track" ? "track" : "css";
-        } else return;
+      cameraZoomSupported = true;
+      if (!cameraZoomMode || cameraZoomMode === "none") {
+        cameraZoomMode = "css";
+        cameraZoomMin = 1;
+        cameraZoomMax = 4;
       }
-      const step = Number(delta) || 0;
-      applyCameraZoom(cameraZoom + step);
+      applyCameraZoom(cameraZoom + (Number(delta) || 0));
+    }
+
+    function ensureZoomBarMounted(onLive) {
+      let bar = document.getElementById("live-zoom-bar");
+      if (!bar) return null;
+      // Park on document.body so fullscreen / overflow / stacking never hides it
+      if (onLive) {
+        if (bar.parentElement !== document.body) {
+          document.body.appendChild(bar);
+        }
+        bar.style.cssText = [
+          "position:fixed",
+          "right:12px",
+          "top:38%",
+          "z-index:2147483646",
+          "display:flex",
+          "flex-direction:column",
+          "align-items:center",
+          "gap:10px",
+          "padding:10px 8px",
+          "border-radius:16px",
+          "background:rgba(0,0,0,0.9)",
+          "border:2px solid #d9a441",
+          "box-shadow:0 4px 24px rgba(0,0,0,0.7)",
+          "pointer-events:auto",
+          "visibility:visible",
+          "opacity:1"
+        ].join(";");
+        bar.classList.remove("hidden");
+        bar.removeAttribute("hidden");
+        bar.querySelectorAll("button").forEach(function (btn) {
+          btn.style.cssText = "width:52px;height:52px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);background:#1c1f1e;color:#f2f4f3;font-size:30px;font-weight:900;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;margin:0;pointer-events:auto;cursor:pointer;";
+        });
+        var lab = bar.querySelector(".zoom-label");
+        if (lab) lab.style.cssText = "color:#d9a441;font-size:14px;font-weight:900;min-width:52px;text-align:center;";
+      } else {
+        bar.style.display = "none";
+        // return under screen-live for tidy DOM
+        const live = document.getElementById("screen-live");
+        if (live && bar.parentElement === document.body) {
+          const startOv = document.getElementById("live-start-overlay");
+          if (startOv) live.insertBefore(bar, startOv);
+          else live.appendChild(bar);
+        }
+      }
+      return bar;
     }
 
     function updateZoomUI() {
       const label = document.getElementById("zoom-level-label");
-      const bar = document.getElementById("live-zoom-bar");
-      if (label) {
-        label.textContent = (Math.round(cameraZoom * 10) / 10).toFixed(1) + "×";
-      }
-      // Always show on live screen once camera path has run (css fallback always available)
-      if (bar) {
-        const liveOn = document.getElementById("screen-live") && document.getElementById("screen-live").classList.contains("active");
-        bar.classList.toggle("hidden", !(liveOn && cameraZoomSupported));
-        bar.style.display = (liveOn && cameraZoomSupported) ? "flex" : "";
+      const bar = ensureZoomBarMounted(!!(document.body && document.body.classList.contains("live-active")));
+      if (label) label.textContent = (Math.round(cameraZoom * 10) / 10).toFixed(1) + "×";
+      if (bar && document.body.classList.contains("live-active")) {
+        bar.style.display = "flex";
+        bar.style.visibility = "visible";
+        bar.style.opacity = "1";
+        bar.classList.remove("hidden");
       }
     }
 
@@ -1833,44 +1916,43 @@
 
       function dist(touches) {
         if (!touches || touches.length < 2) return 0;
-        const a = touches[0], b = touches[1];
-        const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
         return Math.sqrt(dx * dx + dy * dy);
       }
 
       root.addEventListener("touchstart", function (e) {
-        if (!cameraZoomSupported || !e.touches || e.touches.length !== 2) return;
-        // Allow pinch anywhere on live screen except when clearly on a single-button control
+        if (!e.touches || e.touches.length !== 2) return;
         e.preventDefault();
         cameraPinchStartDist = dist(e.touches);
         cameraPinchStartZoom = cameraZoom;
-      }, { passive: false });
+      }, { passive: false, capture: true });
 
       root.addEventListener("touchmove", function (e) {
-        if (!cameraZoomSupported || !e.touches || e.touches.length !== 2 || !cameraPinchStartDist) return;
+        if (!e.touches || e.touches.length !== 2 || !cameraPinchStartDist) return;
         e.preventDefault();
         const d = dist(e.touches);
         if (d <= 0) return;
-        const ratio = d / cameraPinchStartDist;
-        applyCameraZoom(cameraPinchStartZoom * ratio);
-      }, { passive: false });
+        if (!cameraZoomMode || cameraZoomMode === "none") {
+          cameraZoomMode = "css"; cameraZoomMin = 1; cameraZoomMax = 4; cameraZoomSupported = true;
+        }
+        applyCameraZoom(cameraPinchStartZoom * (d / cameraPinchStartDist));
+      }, { passive: false, capture: true });
 
       root.addEventListener("touchend", function (e) {
         if (!e.touches || e.touches.length < 2) cameraPinchStartDist = 0;
-      });
-      root.addEventListener("touchcancel", function () {
-        cameraPinchStartDist = 0;
-      });
+      }, { capture: true });
+      root.addEventListener("touchcancel", function () { cameraPinchStartDist = 0; }, { capture: true });
     }
 
     function resetCameraZoom() {
       cameraZoom = 1;
       cameraZoomMin = 1;
-      cameraZoomMax = 1;
-      cameraZoomSupported = false;
-      cameraZoomMode = "none";
+      cameraZoomMax = 4;
+      cameraZoomSupported = true;
+      cameraZoomMode = "css";
       const vid = document.getElementById("live-video");
-      if (vid) vid.style.transform = "translateZ(0)";
+      if (vid) vid.style.transform = "scale(1)";
       updateZoomUI();
     }
 
