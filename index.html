@@ -382,6 +382,32 @@
       .live-action-bar { display: grid; align-items: end; }
       .live-overlay .live-bottom { margin-top: auto; }
       .live-overlay .live-spacer { flex: 1 1 auto; min-height: 0; }
+      /* Align − / + with left/right edges like the bottom scoring buttons */
+      .live-overlay .score-strip {
+        padding-left: 0;
+        padding-right: 0;
+        gap: var(--live-gap, 5px);
+      }
+      .score-left-col {
+        width: 100%;
+        max-width: none;
+        justify-self: stretch;
+        align-items: flex-start;
+      }
+      .score-right-col {
+        width: 100%;
+        max-width: none;
+        justify-self: stretch;
+        align-items: flex-end;
+      }
+      .score-left-col .zoom-btn {
+        align-self: flex-start;
+        margin-left: 0;
+      }
+      .score-right-col .zoom-btn {
+        align-self: flex-end;
+        margin-right: 0;
+      }
     }
     @media (orientation: portrait) {
       .live-action-bar { display: none; }
@@ -475,25 +501,39 @@
     .score-right-col .score-pill { width: 100%; }
     .score-left-col .zoom-btn,
     .score-right-col .zoom-btn {
-      width: 100%;
-      max-width: 100%;
-      min-height: var(--live-chip-h, 36px);
+      width: var(--live-chip-h, 36px);
       height: var(--live-chip-h, 36px);
-      font-size: calc(var(--live-btn-fs, 12px) + 6px);
+      min-width: var(--live-chip-h, 36px);
+      min-height: var(--live-chip-h, 36px);
+      max-width: var(--live-chip-h, 36px);
+      padding: 0;
+      font-size: calc(var(--live-btn-fs, 12px) + 8px);
       font-weight: 900;
       line-height: 1;
       color: var(--gold);
       border-color: rgba(217,164,65,0.65);
       background: rgba(0,0,0,0.72);
-      padding: 0 8px;
+      border-radius: 8px;
     }
-    .score-left-col .zoom-btn { align-self: stretch; }
-    .score-right-col .zoom-btn { align-self: stretch; }
-    .score-right-col .end-btn {
-      width: 100%;
+    .score-left-col .zoom-btn { align-self: flex-start; }
+    .score-right-col .zoom-btn { align-self: flex-end; }
+    .center-chip-row {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      flex-wrap: nowrap;
+    }
+    .center-chip-row .live-chip.period,
+    .center-chip-row .live-chip.end-btn {
+      width: auto;
+      min-width: 0;
+      flex: 0 0 auto;
       min-height: var(--live-chip-h, 36px);
       height: var(--live-chip-h, 36px);
       font-size: var(--live-btn-fs, 12px);
+      padding: 0 10px;
     }
     .zoom-level-chip {
       margin-top: 2px;
@@ -504,6 +544,11 @@
       opacity: 0.95;
       text-shadow: 0 1px 3px rgba(0,0,0,0.85);
       font-variant-numeric: tabular-nums;
+    }
+    /* Hide +/- UI unless Admin enables it; pinch still works */
+    body:not(.show-zoom-buttons) .zoom-btn,
+    body:not(.show-zoom-buttons) .zoom-level-chip {
+      display: none !important;
     }
     /* Old floating bar kept out of the way if present */
     .live-zoom-bar { display: none !important; }
@@ -797,7 +842,10 @@
           <button type="button" class="live-chip zoom-btn" id="zoom-out-btn" onclick="event.stopPropagation(); nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
         </div>
         <div class="score-center-col">
-          <button type="button" class="live-chip period" id="period-btn" onclick="cyclePeriod()">P1</button>
+          <div class="center-chip-row">
+            <button type="button" class="live-chip period" id="period-btn" onclick="cyclePeriod()">P1</button>
+            <button type="button" class="live-chip end-btn" onclick="endLiveMatch()">End Match</button>
+          </div>
           <div class="pos-label pos-neutral" id="pos-label">Neutral</div>
           <div class="zoom-level-chip" id="zoom-level-label">1.0×</div>
         </div>
@@ -809,7 +857,6 @@
             </div>
             <button type="button" class="inj-choice-btn" id="inj-choice-opp" onclick="openInjChoice('opp')" title="Injury choice — opponent">Inj Choice</button>
           </div>
-          <button type="button" class="live-chip end-btn" onclick="endLiveMatch()">End Match</button>
           <button type="button" class="live-chip zoom-btn" id="zoom-in-btn" onclick="event.stopPropagation(); nudgeCameraZoom(0.25)" title="Zoom in">+</button>
         </div>
       </div>
@@ -873,6 +920,17 @@
         <p class="muted" style="margin-bottom:10px;">OAuth Client ID configured for Strategic Wrestler &amp; MatScorer.</p>
         <button type="button" class="btn btn-green" onclick="authGoogleDrive()">Authorize Drive</button>
         <p class="muted" style="margin-top:8px;" id="gdrive-status">Not connected</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Live scoring</div>
+        <label class="check-row" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0;">
+          <input type="checkbox" id="admin-show-zoom-btns" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;" onchange="setShowZoomButtons(this.checked)" />
+          <span>
+            <strong style="color:var(--chalk);">Show zoom +/− buttons</strong>
+            <span class="muted" style="display:block;margin-top:4px;font-size:12px;">Off by default. Pinch-to-zoom on the live camera always works on phones and tablets.</span>
+          </span>
+        </label>
       </div>
 
       <div class="card">
@@ -940,7 +998,7 @@
     let tokenClient;
     let gapiInited = false;
 
-    let store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", gdriveFolder: "MatScorer", demoMode: false, seasonMeta: null, gapiClientId: HARDCODED_CLIENT_ID, weightClasses: null };
+    let store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", gdriveFolder: "MatScorer", demoMode: false, seasonMeta: null, gapiClientId: HARDCODED_CLIENT_ID, weightClasses: null , showZoomButtons: false };
     let driveFolderId = null;
     
     let exportDirHandle = null; 
@@ -980,6 +1038,18 @@
     let lastPackage = null;
     let reviewMatch = null;
 
+    function setShowZoomButtons(on) {
+      store.showZoomButtons = !!on;
+      try { saveStore(); } catch (e) {}
+      applyShowZoomButtons();
+    }
+    function applyShowZoomButtons() {
+      const on = !!(store && store.showZoomButtons);
+      document.body.classList.toggle("show-zoom-buttons", on);
+      const cb = document.getElementById("admin-show-zoom-btns");
+      if (cb) cb.checked = on;
+      try { updateZoomUI(); } catch (e) {}
+    }
     function toast(msg) {
       const el = document.getElementById("toast"); el.textContent = msg; el.style.display = "block";
       clearTimeout(toast._t); toast._t = setTimeout(() => { el.style.display = "none"; }, 2200);
@@ -1046,6 +1116,7 @@
         if (raw) {
           const data = JSON.parse(raw);
           store = Object.assign(store, data);
+          if (typeof store.showZoomButtons !== "boolean") store.showZoomButtons = false;
           if (!Array.isArray(store.events)) store.events = [];
           if (!Array.isArray(store.roster)) store.roster = [];
           if (store.gdriveFolder === "MatSide") store.gdriveFolder = "MatScorer";
@@ -1053,12 +1124,15 @@
       } catch (e) {}
       store.gapiClientId = HARDCODED_CLIENT_ID;
     }
+        try { applyShowZoomButtons(); } catch (e) {}
+
     function saveStore() { try { store.gapiClientId = HARDCODED_CLIENT_ID; localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { toast("Storage full"); } }
 
     function showScreen(id) {
       document.querySelectorAll(".screen, #screen-live").forEach(el => el.classList.remove("active"));
       const el = document.getElementById(id); if (el) el.classList.add("active");
       const isLive = id === "screen-live"; document.body.classList.toggle("live-active", isLive);
+      try { applyShowZoomButtons(); } catch (e) {}
       if (isLive) {
         try {
           cameraZoomSupported = true;
