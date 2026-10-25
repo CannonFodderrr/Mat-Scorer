@@ -170,6 +170,12 @@
       --live-gap: 5px;
       --live-btn-fs: 11px;
       --live-btn-w: 33.333%;
+      --live-name-fs: 13px;
+      --live-period-fs: 16px;
+      --live-chip-fs: 11px;
+      --live-score-pad-y: 4px;
+      --live-score-pad-x: 12px;
+      --live-ui-scale: 1;
     }
     #screen-live.active {
       display: flex; position: fixed; inset: 0; z-index: 1000;
@@ -363,9 +369,13 @@
     .ov-grid { gap: var(--live-gap) !important; }
     .names-row {
       margin-bottom: 0 !important;
-      font-size: clamp(11px, 2.8dvh, 14px) !important;
+      font-size: var(--live-name-fs, clamp(11px, 2.8dvh, 14px)) !important;
     }
-    .score-pill .num { font-size: var(--live-score-num) !important; }
+    .score-pill {
+      padding: var(--live-score-pad-y, 4px) var(--live-score-pad-x, 12px) !important;
+      border-radius: calc(8px * var(--live-ui-scale, 1));
+    }
+    .score-pill .num { font-size: var(--live-score-num) !important; line-height: 1; }
 
     @media (orientation: landscape) {
       html, body { max-width: none; height: 100%; height: 100dvh; height: 100svh; }
@@ -420,8 +430,32 @@
     .live-chip { font-size: 11px; font-weight: 800; padding: 6px 10px; border-radius: 8px; background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.12); color: var(--chalk); backdrop-filter: blur(6px); cursor: pointer; }
     .live-chip.rec { color: #ff6b5a; border-color: rgba(194,59,34,0.5); }
     .live-chip.rec.paused { color: var(--gold); border-color: rgba(217,164,65,0.55); }
-    .live-chip.period { color: var(--gold); border-color: rgba(217,164,65,0.5); min-width: 48px; text-align: center; font-size: 16px; padding: 8px 12px; }
-    .live-chip.end-btn { color: var(--chalk); border-color: rgba(255,255,255,0.25); background: rgba(0,0,0,0.7); white-space: nowrap; transition: 0.2s all; }
+    .live-chip.period {
+      color: var(--gold); border-color: rgba(217,164,65,0.5);
+      min-width: calc(48px * var(--live-ui-scale, 1));
+      text-align: center;
+      font-size: var(--live-period-fs, 16px);
+      padding: calc(6px * var(--live-ui-scale, 1)) calc(10px * var(--live-ui-scale, 1));
+      min-height: var(--live-chip-h);
+    }
+    .live-chip.end-btn {
+      color: var(--chalk); border-color: rgba(255,255,255,0.25); background: rgba(0,0,0,0.7);
+      white-space: nowrap; transition: 0.2s all;
+      font-size: var(--live-chip-fs, 11px);
+      min-height: var(--live-chip-h);
+      padding: calc(6px * var(--live-ui-scale, 1)) calc(10px * var(--live-ui-scale, 1));
+    }
+    .live-chip:not(.period):not(.end-btn) {
+      font-size: var(--live-chip-fs, 11px);
+    }
+    .live-chip.zoom-btn {
+      width: var(--live-chip-h);
+      height: var(--live-chip-h);
+      min-width: var(--live-chip-h);
+      min-height: var(--live-chip-h);
+      padding: 0;
+      font-size: calc(14px * var(--live-ui-scale, 1));
+    }
     .flash { animation: flashEnd 1s infinite; background: var(--red) !important; color: #fff !important; border-color: #fff !important; }
     @keyframes flashEnd { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     
@@ -3630,22 +3664,48 @@
           document.body.style.height = h + "px";
         }
         const landscape = w > h;
-        const reservedTop = landscape ? 58 : 76;
-        const reservedBottom = 10;
-        const available = Math.max(140, h - reservedTop - reservedBottom);
+        const shortSide = Math.min(w, h);
+        const longSide = Math.max(w, h);
+        // Scale vs a typical phone (~390 CSS px short side). Tablets ~768–1024 grow ~1.5–2×.
+        let scale = shortSide / 390;
+        if (scale < 0.92) scale = 0.92;
+        if (scale > 1.9) scale = 1.9;
+        // Extra bump on large landscape tablets (iPad landscape etc.)
+        if (landscape && longSide >= 900) scale = Math.min(2.05, scale * 1.08);
+        root.style.setProperty("--live-ui-scale", String(Math.round(scale * 100) / 100));
+
+        const reservedTop = Math.round((landscape ? 52 : 68) * Math.min(scale, 1.35));
+        const reservedBottom = Math.round(10 * Math.min(scale, 1.2));
+        const available = Math.max(160, h - reservedTop - reservedBottom);
         const stackCount = landscape ? 5 : 4;
-        const gap = landscape ? Math.max(4, Math.min(8, Math.floor(available * 0.018))) : Math.max(4, Math.min(8, Math.floor(available * 0.02)));
+        const gapBase = landscape ? available * 0.02 : available * 0.022;
+        const gap = Math.max(4, Math.min(Math.round(12 * scale), Math.floor(gapBase)));
         const raw = Math.floor((available - gap * (stackCount + 1)) / stackCount);
-        let btnH = Math.max(40, Math.min(landscape ? 52 : 56, raw));
-        btnH = Math.max(30, Math.round(btnH * 0.8));
-        const chipH = Math.max(28, Math.min(btnH, Math.floor(btnH * 0.95)));
-        const scoreNum = Math.max(18, Math.min(28, Math.floor(h * (landscape ? 0.06 : 0.042))));
-        const btnFs = btnH >= 42 ? 12 : (btnH >= 36 ? 11 : 10);
+        // Allow larger touch targets on big screens; keep phones usable
+        const btnCap = landscape
+          ? Math.round(48 + 28 * Math.min(1, (scale - 1) / 0.9))
+          : Math.round(52 + 32 * Math.min(1, (scale - 1) / 0.9));
+        let btnH = Math.max(Math.round(36 * scale), Math.min(btnCap, Math.round(raw * (scale >= 1.25 ? 0.92 : 0.84))));
+        btnH = Math.max(34, Math.min(landscape ? 70 : 76, btnH));
+        const chipH = Math.max(30, Math.min(btnH, Math.round(btnH * 0.96)));
+        const scoreNum = Math.max(20, Math.min(Math.round(48 * Math.min(scale, 1.7)), Math.round((landscape ? h * 0.075 : h * 0.05) * Math.min(scale, 1.4))));
+        const btnFs = btnH >= 56 ? 15 : (btnH >= 48 ? 13 : (btnH >= 40 ? 12 : 11));
+        const chipFs = chipH >= 48 ? 13 : (chipH >= 40 ? 12 : 11);
+        const periodFs = Math.max(14, Math.min(22, Math.round(16 * scale)));
+        const nameFs = Math.max(12, Math.min(20, Math.round(13 * scale)));
+        const scorePadY = Math.max(3, Math.round(4 * scale));
+        const scorePadX = Math.max(10, Math.round(12 * scale));
+
         root.style.setProperty("--live-btn-h", btnH + "px");
         root.style.setProperty("--live-chip-h", chipH + "px");
         root.style.setProperty("--live-score-num", scoreNum + "px");
         root.style.setProperty("--live-gap", gap + "px");
         root.style.setProperty("--live-btn-fs", btnFs + "px");
+        root.style.setProperty("--live-chip-fs", chipFs + "px");
+        root.style.setProperty("--live-period-fs", periodFs + "px");
+        root.style.setProperty("--live-name-fs", nameFs + "px");
+        root.style.setProperty("--live-score-pad-y", scorePadY + "px");
+        root.style.setProperty("--live-score-pad-x", scorePadX + "px");
       } catch (e) {}
     }
     function reflowActiveScreen() {
