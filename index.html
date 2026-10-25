@@ -793,6 +793,7 @@
       </div>
       <button type="button" class="btn btn-gold" id="btn-install-pwa" onclick="installMatScorerApp()" style="margin-top:10px; display:none;">Install app (hide address bar)</button>
       <p class="muted" style="margin-top:8px; font-size:11px;">Android: use <strong>Install app</strong> (or Chrome menu → Install app), then open from the home screen icon. A plain “Add to Home screen” shortcut often still shows the address bar.</p>
+      <p class="muted" style="margin-top:6px; font-size:11px;"><strong>Offline:</strong> Open MatScorer <em>once while online</em> so it can cache. After that you can open and score matches offline. Google Drive sync needs internet.</p>
     </div>
   </div>
 
@@ -1351,7 +1352,8 @@
         "3. Chrome menu (⋮) → Install app / Install MatScorer.\n" +
         "4. Open from the home-screen ICON (not a Chrome tab).\n\n" +
         "Remove any old home-screen shortcut first — those often keep the address bar.\n" +
-        "If you only see Add to Home screen and not Install app, the service worker may be missing."
+        "If you only see Add to Home screen and not Install app, the service worker may be missing.\n\n" +
+        "Offline use: open MatScorer once while online so the app caches, then you can score offline."
       );
     }
 
