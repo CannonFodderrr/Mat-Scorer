@@ -10,8 +10,67 @@
   <meta name="application-name" content="SW MatScorer" />
   <meta name="theme-color" content="#1C1F1E" />
   <meta name="format-detection" content="telephone=no" />
+  <meta name="description" content="SW MatScorer — live dual scoring and recording for Strategic Wrestler" />
   <title>SW MatScorer</title>
-  
+  <!-- PWA: Android needs a real web manifest + service worker for standalone (no address bar) -->
+  <link rel="icon" type="image/png" sizes="192x192" href="matscorer-icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="matscorer-icon-180.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="matscorer-icon-192.png" />
+  <script>
+  (function () {
+    function absUrl(path) {
+      try { return new URL(path, window.location.href).href; } catch (e) { return path; }
+    }
+    function beside(name) {
+      try {
+        if (window.location.pathname && window.location.pathname.indexOf("/") >= 0) {
+          var base = window.location.pathname.replace(/[^/]+$/, "");
+          return absUrl(base + name);
+        }
+      } catch (e) {}
+      return absUrl(name);
+    }
+    var startUrl = absUrl(window.location.pathname + window.location.search);
+    var manifest = {
+      name: "SW MatScorer",
+      short_name: "MatScorer",
+      description: "Live dual scoring and recording for Strategic Wrestler",
+      start_url: startUrl,
+      scope: absUrl("."),
+      display: "standalone",
+      display_override: ["standalone", "fullscreen", "minimal-ui"],
+      orientation: "any",
+      background_color: "#1C1F1E",
+      theme_color: "#1C1F1E",
+      icons: [
+        { src: beside("matscorer-icon-192.png"), sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: beside("matscorer-icon-512.png"), sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: beside("matscorer-icon-512-maskable.png"), sizes: "512x512", type: "image/png", purpose: "maskable" }
+      ]
+    };
+    try {
+      var blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("link");
+      link.rel = "manifest";
+      link.href = url;
+      document.head.appendChild(link);
+    } catch (e) {}
+    // Same-origin service worker (matscorer-sw.js next to this HTML) — needed for Chrome "Install app"
+    if ("serviceWorker" in navigator) {
+      try {
+        var swUrl = "matscorer-sw.js";
+        try {
+          var base = (window.location.pathname || "/").replace(/[^/]+$/, "");
+          swUrl = base + "matscorer-sw.js";
+        } catch (ePath) {}
+        navigator.serviceWorker.register(swUrl).catch(function () {
+          navigator.serviceWorker.register("matscorer-sw.js").catch(function () {});
+        });
+      } catch (e2) {}
+    }
+  })();
+  </script>
   <script src="https://apis.google.com/js/api.js"></script>
   <script src="https://accounts.google.com/gsi/client"></script>
 
@@ -732,6 +791,8 @@
         <button type="button" class="btn btn-gold" onclick="openEventList()">Events</button>
         <button type="button" class="btn btn-ghost" onclick="openAdmin()">Admin</button>
       </div>
+      <button type="button" class="btn btn-gold" id="btn-install-pwa" onclick="installMatScorerApp()" style="margin-top:10px; display:none;">Install app (hide address bar)</button>
+      <p class="muted" style="margin-top:8px; font-size:11px;">Android: use <strong>Install app</strong> (or Chrome menu → Install app), then open from the home screen icon. A plain “Add to Home screen” shortcut often still shows the address bar.</p>
     </div>
   </div>
 
@@ -1232,6 +1293,67 @@
       } else { renderHome(); }
     }
     function pushNav(screen) { if (navStack[navStack.length - 1] !== screen) navStack.push(screen); }
+
+    function isStandaloneDisplay() {
+      try {
+        if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return true;
+        if (window.matchMedia && window.matchMedia("(display-mode: fullscreen)").matches) return true;
+        if (window.navigator.standalone === true) return true;
+      } catch (e) {}
+      return false;
+    }
+
+    let deferredInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      try {
+        const b = document.getElementById("btn-install-pwa");
+        if (b) b.style.display = "";
+      } catch (err) {}
+    });
+    window.addEventListener("appinstalled", function () {
+      deferredInstallPrompt = null;
+      try { updateInstallButtonVisibility(); } catch (e) {}
+    });
+
+    function updateInstallButtonVisibility() {
+      try {
+        const b = document.getElementById("btn-install-pwa");
+        if (!b) return;
+        b.style.display = isStandaloneDisplay() ? "none" : "";
+      } catch (e) {}
+    }
+    try {
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", updateInstallButtonVisibility);
+      } else {
+        setTimeout(updateInstallButtonVisibility, 0);
+      }
+    } catch (e) {}
+
+    async function installMatScorerApp() {
+      if (isStandaloneDisplay()) {
+        alert("Already running as an installed app (no browser address bar).");
+        return;
+      }
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        try { await deferredInstallPrompt.userChoice; } catch (e) {}
+        deferredInstallPrompt = null;
+        try { updateInstallButtonVisibility(); } catch (e) {}
+        return;
+      }
+      alert(
+        "To hide the address bar on Android:\n\n" +
+        "1. Open MatScorer in Chrome over https (GitHub Pages URL), not a downloaded file.\n" +
+        "2. Deploy matscorer-sw.js in the SAME folder as MatScorer.html.\n" +
+        "3. Chrome menu (⋮) → Install app / Install MatScorer.\n" +
+        "4. Open from the home-screen ICON (not a Chrome tab).\n\n" +
+        "Remove any old home-screen shortcut first — those often keep the address bar.\n" +
+        "If you only see Add to Home screen and not Install app, the service worker may be missing."
+      );
+    }
 
     async function enterLiveFullscreen() {
       try {
