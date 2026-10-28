@@ -791,9 +791,25 @@
         <button type="button" class="btn btn-gold" onclick="openEventList()">Events</button>
         <button type="button" class="btn btn-ghost" onclick="openAdmin()">Admin</button>
       </div>
-      <button type="button" class="btn btn-gold" id="btn-install-pwa" onclick="installMatScorerApp()" style="margin-top:10px; display:none;">Install app (hide address bar)</button>
-      <p class="muted" style="margin-top:8px; font-size:11px;">Android: use <strong>Install app</strong> (or Chrome menu → Install app), then open from the home screen icon. A plain “Add to Home screen” shortcut often still shows the address bar.</p>
+      <button type="button" class="btn btn-gold" id="btn-install-pwa" onclick="installMatScorerApp()" style="margin-top:10px;">Install to Home Screen</button>
+      <p class="muted" style="margin-top:8px; font-size:11px;" id="install-pwa-hint">
+        <strong>iPhone / iPad:</strong> tap the button for steps (Safari → Share → Add to Home Screen), then open from the icon for full screen.<br/>
+        <strong>Android:</strong> tap the button for Install app (Chrome), then open from the home screen icon — not a browser tab.
+      </p>
       <p class="muted" style="margin-top:6px; font-size:11px;"><strong>Offline:</strong> Open MatScorer <em>once while online</em> so it can cache. After that you can open and score matches offline. Google Drive sync needs internet.</p>
+      <div id="ios-install-sheet" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.72); align-items:flex-end; justify-content:center;">
+        <div style="background:#1C1F1E; color:#F2F0E6; border:1px solid #C9A227; border-radius:16px 16px 0 0; padding:20px 18px 28px; width:100%; max-width:480px; box-sizing:border-box;">
+          <div style="font-weight:800; font-size:16px; margin-bottom:10px; color:#C9A227;">Install MatScorer on iPhone / iPad</div>
+          <ol style="margin:0 0 14px 18px; padding:0; font-size:14px; line-height:1.5;">
+            <li style="margin-bottom:8px;">Open this page in <strong>Safari</strong> (required on iOS).</li>
+            <li style="margin-bottom:8px;">Tap the <strong>Share</strong> button <span style="opacity:0.9;">(square with ↑)</span> at the bottom (iPhone) or top (iPad).</li>
+            <li style="margin-bottom:8px;">Scroll and tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+            <li>Open <strong>MatScorer</strong> from the Home Screen icon — the address bar stays hidden.</li>
+          </ol>
+          <p style="font-size:12px; opacity:0.75; margin:0 0 14px 0;">Apple does not allow apps to install with one tap like Android. This is the official iOS method.</p>
+          <button type="button" class="btn btn-gold" style="width:100%;" onclick="closeIosInstallSheet()">Got it</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1322,7 +1338,18 @@
       try {
         const b = document.getElementById("btn-install-pwa");
         if (!b) return;
-        b.style.display = isStandaloneDisplay() ? "none" : "";
+        if (isStandaloneDisplay()) {
+          b.style.display = "none";
+          const hint = document.getElementById("install-pwa-hint");
+          if (hint) hint.style.display = "none";
+          return;
+        }
+        b.style.display = "";
+        if (typeof isIosDevice === "function" && isIosDevice()) {
+          b.textContent = "Install to Home Screen (iPhone / iPad)";
+        } else {
+          b.textContent = "Install app (Android / Chrome)";
+        }
       } catch (e) {}
     }
     try {
@@ -1333,27 +1360,65 @@
       }
     } catch (e) {}
 
+    async function isIosDevice() {
+      try {
+        const ua = navigator.userAgent || "";
+        if (/iPad|iPhone|iPod/.test(ua)) return true;
+        if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
+      } catch (e) {}
+      return false;
+    }
+
+    function closeIosInstallSheet() {
+      try {
+        const sheet = document.getElementById("ios-install-sheet");
+        if (sheet) sheet.style.display = "none";
+      } catch (e) {}
+    }
+
+    function showIosInstallSheet() {
+      try {
+        const sheet = document.getElementById("ios-install-sheet");
+        if (sheet) {
+          sheet.style.display = "flex";
+          return;
+        }
+      } catch (e) {}
+      alert(
+        "Install on iPhone / iPad:\n\n" +
+        "1. Open MatScorer in Safari.\n" +
+        "2. Tap Share (square with arrow).\n" +
+        "3. Tap Add to Home Screen → Add.\n" +
+        "4. Open from the Home Screen icon for full screen (no address bar)."
+      );
+    }
+
     async function installMatScorerApp() {
       if (isStandaloneDisplay()) {
         alert("Already running as an installed app (no browser address bar).");
         return;
       }
+      if (isIosDevice()) {
+        showIosInstallSheet();
+        return;
+      }
       if (deferredInstallPrompt) {
-        deferredInstallPrompt.prompt();
-        try { await deferredInstallPrompt.userChoice; } catch (e) {}
+        try {
+          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice;
+        } catch (e) {}
         deferredInstallPrompt = null;
         try { updateInstallButtonVisibility(); } catch (e) {}
         return;
       }
       alert(
-        "To hide the address bar on Android:\n\n" +
+        "To install on Android (hide address bar):\n\n" +
         "1. Open MatScorer in Chrome over https (GitHub Pages URL), not a downloaded file.\n" +
-        "2. Deploy matscorer-sw.js in the SAME folder as MatScorer.html.\n" +
+        "2. Keep matscorer-sw.js in the SAME folder as MatScorer.html.\n" +
         "3. Chrome menu (⋮) → Install app / Install MatScorer.\n" +
         "4. Open from the home-screen ICON (not a Chrome tab).\n\n" +
-        "Remove any old home-screen shortcut first — those often keep the address bar.\n" +
-        "If you only see Add to Home screen and not Install app, the service worker may be missing.\n\n" +
-        "Offline use: open MatScorer once while online so the app caches, then you can score offline."
+        "If you only see Add to Home screen, the service worker may be missing.\n\n" +
+        "iPhone / iPad: use Safari → Share → Add to Home Screen."
       );
     }
 
