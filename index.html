@@ -71,7 +71,30 @@
     }
   })();
   </script>
-  <script src="https://apis.google.com/js/api.js"></script>
+  
+  <script>
+  (function(){
+    try {
+      var st = window.matchMedia && (
+        window.matchMedia("(display-mode: standalone)").matches ||
+        window.matchMedia("(display-mode: fullscreen)").matches ||
+        window.matchMedia("(display-mode: minimal-ui)").matches
+      );
+      if (st || (window.navigator && window.navigator.standalone === true)) {
+        try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
+        document.documentElement.classList.add("ms-installed");
+      } else if (localStorage.getItem("matscorer-pwa-installed") === "1") {
+        document.documentElement.classList.add("ms-installed");
+      }
+    } catch (e) {}
+  })();
+  </script>
+  <style id="ms-early-install-hide">
+    html.ms-installed #btn-install-apple,
+    html.ms-installed #btn-install-android,
+    html.ms-installed #install-pwa-hint { display: none !important; }
+  </style>
+<script src="https://apis.google.com/js/api.js"></script>
   <script src="https://accounts.google.com/gsi/client"></script>
 
   <style>
@@ -148,6 +171,42 @@
     .btn-ghost { background: var(--mat); color: var(--chalk); border: 1px solid var(--panelLine); }
     .btn-gold-on-gold { background: var(--goldDim); color: var(--gold); border: 1px solid var(--gold); }
     .btn-gold-on-gold:active { opacity: 0.85; }
+    .btn-green-on-green {
+      background: var(--greenDim) !important;
+      color: var(--green) !important;
+      border: 1px solid var(--green) !important;
+    }
+    .btn-green-on-green:active { opacity: 0.85; }
+    #ev-export-btn {
+      margin: 0 0 0 auto !important;
+      padding: 8px 10px !important;
+      font-size: 11px !important;
+      font-weight: 800 !important;
+      flex: 0 0 auto !important;
+      width: 7.8em !important;
+      min-width: 7.8em !important;
+      max-width: 7.8em !important;
+      white-space: nowrap !important;
+      text-align: center !important;
+      line-height: 1.2 !important;
+      height: auto !important;
+    }
+    .filter-row-wrap {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 8px !important;
+      flex-wrap: nowrap !important;
+      width: 100% !important;
+      margin-bottom: 8px !important;
+    }
+    .filter-row-wrap #level-filter {
+      display: flex !important;
+      gap: 6px !important;
+      flex: 0 1 auto !important;
+      margin: 0 !important;
+      justify-content: flex-start !important;
+    }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .btn-row .btn { margin-top: 0; }
@@ -781,8 +840,8 @@
     }
     @keyframes ms-spin { to { transform: rotate(360deg); } }
     #match-save-overlay .save-overlay-msg { color: var(--chalk); font-size: 13px; font-weight: 700; }
-    .rev-speed-row { display:flex; gap:6px; flex-wrap:wrap; margin: 8px 0; align-items:center; }
-    .rev-speed-row button { padding: 4px 10px; font-size: 11px; font-weight: 800; }
+    .rev-speed-row { display:flex !important; gap:4px !important; flex-wrap:nowrap !important; margin:6px 0 !important; align-items:center !important; overflow-x:auto !important; }
+    .rev-speed-row button { padding:3px 6px !important; font-size:10px !important; font-weight:800 !important; min-width:0 !important; width:auto !important; flex:0 0 auto !important; margin:0 !important; }
     .event-log .log-row { cursor: pointer; }
     .event-log .log-row:hover { background: rgba(201,162,39,0.12); }
 
@@ -956,7 +1015,7 @@
     
     <div class="filter-row-wrap" style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:nowrap; margin-bottom:8px; width:100%;">
       <div class="filter-row" id="level-filter" style="display:flex; gap:6px; flex:0 1 auto; margin:0; justify-content:flex-start;"></div>
-      <button type="button" class="btn btn-green" id="ev-export-btn" onclick="exportEventPackages()" style="margin:0 0 0 auto; padding:8px 5px; font-size:10px; font-weight:800; flex:0 0 auto; width:2.6em; min-width:2.6em; max-width:2.6em; line-height:1.2; white-space:normal; text-align:center; height:auto;">Export</button>
+      <button type="button" class="btn btn-green-on-green" id="ev-export-btn" onclick="exportEventPackages()">Export</button>
     </div>
 
     <div id="wc-list"></div>
@@ -1128,7 +1187,7 @@
             <span class="muted" style="display:block;margin-top:4px;font-size:12px;">Off by default. Pinch-to-zoom on the live camera always works on phones and tablets.</span>
           </span>
         </label>
-        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);margin-bottom:8px;">Team roster</div>
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:var(--gold);margin-bottom:8px;">Team roster</div>
         <p class="muted" style="margin-bottom:10px;">Import a Strategic Wrestler season export from device or Google Drive.</p>
         <div class="btn-row" style="margin-bottom:8px;">
           <button type="button" class="btn btn-ghost" style="margin-top:0;" onclick="document.getElementById('admin-roster-file').click()">Device file</button>
@@ -1551,13 +1610,29 @@
         const apple = document.getElementById("btn-install-apple");
         const android = document.getElementById("btn-install-android");
         const hint = document.getElementById("install-pwa-hint");
-        if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) {
+        let standalone = false;
+        try {
+          standalone = !!(window.matchMedia && (
+            window.matchMedia("(display-mode: standalone)").matches ||
+            window.matchMedia("(display-mode: fullscreen)").matches ||
+            window.matchMedia("(display-mode: minimal-ui)").matches ||
+            window.matchMedia("(display-mode: window-controls-overlay)").matches
+          ));
+          if (window.navigator.standalone === true) standalone = true;
+        } catch (e) {}
+        if (standalone) {
           try { markAppInstalled(); } catch (e) {}
         }
-        const hide = (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) || (typeof isAppInstallRemembered === "function" && isAppInstallRemembered());
-        if (apple) apple.style.display = hide ? "none" : "";
-        if (android) android.style.display = hide ? "none" : "";
-        if (hint) hint.style.display = hide ? "none" : "";
+        let remembered = false;
+        try {
+          remembered = !!(window._msInstalled ||
+            sessionStorage.getItem("matscorer-pwa-installed") === "1" ||
+            localStorage.getItem("matscorer-pwa-installed") === "1");
+        } catch (e) {}
+        const hide = standalone || remembered;
+        if (apple) { apple.style.display = hide ? "none" : ""; apple.hidden = !!hide; }
+        if (android) { android.style.display = hide ? "none" : ""; android.hidden = !!hide; }
+        if (hint) { hint.style.display = hide ? "none" : ""; hint.hidden = !!hide; }
       } catch (e) {}
     }
 
@@ -1883,6 +1958,7 @@ function openEventList() {
       saveStore();
       toast(added ? "Events imported" : "No new events");
       if (added) setTimeout(() => openEventList(), 600);
+      try { saveStore(); } catch (e) {}
       return added;
     }
     document.getElementById("ae-sync-file").addEventListener("change", async (e) => {
@@ -1890,6 +1966,7 @@ function openEventList() {
       try {
         const text = await file.text();
         importEventData(JSON.parse(text));
+        try { saveStore(); } catch (e2) {}
       } catch (err) { alert("Could not import: " + (err.message || err)); }
       e.target.value = "";
     });
@@ -4075,6 +4152,7 @@ async function resolveMatScorerDir(handle) {
     async function clearStoredVideos() { if (!confirm("Delete all videos stored in this browser? Score data is kept.")) return; await clearAllStoredVideos(); updateAdminUI(); toast("Stored videos cleared"); }
 
     function importRosterData(data) {
+      try { /* persist roster */ } catch (e) {}
       const parsed = parseMatScoutPayload(data);
       store.roster = (parsed.roster || []).filter(w => !w.quit);
       if (parsed.teamName) store.teamName = parsed.teamName;
@@ -4648,6 +4726,12 @@ async function resolveMatScorerDir(handle) {
       try { updateInstallButtonVisibility(); } catch (e) {}
       try { renderHome(); } catch (e) {}
     })();
+    // Periodic persist (Android PWA reliability)
+    try {
+      window._msAutoSave = setInterval(function () {
+        try { if (store && ((store.events && store.events.length) || (store.roster && store.roster.length))) saveStore(); } catch (e) {}
+      }, 15000);
+    } catch (e) {}
     window.addEventListener("pagehide", function () { try { saveStore(); } catch (e) {} });
     window.addEventListener("beforeunload", function () { try { saveStore(); } catch (e) {} });
     document.addEventListener("visibilitychange", function () {
