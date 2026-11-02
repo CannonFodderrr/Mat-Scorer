@@ -786,6 +786,35 @@
     .event-log .log-row { cursor: pointer; }
     .event-log .log-row:hover { background: rgba(201,162,39,0.12); }
 
+    
+    .score-log-modal {
+      display: none; position: fixed; inset: 0; z-index: 20000;
+      background: rgba(0,0,0,0.65); align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .score-log-modal.open { display: flex; }
+    .score-log-card {
+      width: min(420px, 100%); max-height: 80vh; overflow: auto;
+      background: var(--panel); border: 1px solid var(--panelLine); border-radius: 12px;
+      padding: 14px 14px 16px; position: relative;
+    }
+    .score-log-card .sl-title {
+      font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--gold); margin-bottom: 10px; padding-right: 36px;
+    }
+    .score-log-close {
+      position: absolute; top: 10px; right: 10px;
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--red); color: #fff; border: none;
+      font-size: 18px; font-weight: 900; line-height: 1; cursor: pointer;
+    }
+    .score-log-body { font-size: 12px; line-height: 1.45; }
+    .score-log-body .sl-row {
+      padding: 6px 8px; border-bottom: 1px solid var(--panelLine);
+      font-family: ui-monospace, monospace;
+    }
+    .score-log-body .sl-row.choice { color: var(--gold); }
+
     </style>
 </head>
 <body>
@@ -986,6 +1015,7 @@
             </div>
             <button type="button" class="inj-choice-btn" id="inj-choice-our" onclick="openInjChoice('our')" title="Injury choice — our wrestler">Inj Choice</button>
           </div>
+          <button type="button" class="live-chip end-btn" id="score-log-btn" onclick="openScoreLog()" style="align-self:flex-start; margin-top:4px;">Score Log</button>
           <button type="button" class="live-chip zoom-btn" id="zoom-out-btn" onclick="event.stopPropagation(); nudgeCameraZoom(-0.25)" title="Zoom out">−</button>
         </div>
         <div class="score-center-col">
@@ -1071,11 +1101,22 @@
   <!-- ADMIN -->
   <div id="screen-admin" class="screen">
     <div class="admin-grid-2">
-      <div class="card">
+            <div class="card">
         <div class="card-title">Google Drive</div>
         <p class="muted" style="margin-bottom:10px;">OAuth Client ID configured for Strategic Wrestler &amp; MatScorer.</p>
         <button type="button" class="btn btn-green" onclick="authGoogleDrive()">Authorize Drive</button>
         <p class="muted" style="margin-top:8px;" id="gdrive-status">Not connected</p>
+        <div class="card-title" style="margin-top:16px;">Save locations</div>
+        <p class="muted" style="margin-bottom:10px;">Default path: <strong>Strategic Wrestler / MatScorer</strong> on Google Drive and locally when linked.</p>
+        <label>Google Drive folder name</label>
+        <input id="gdrive-folder-name" class="input" placeholder="MatScorer" onchange="saveGdriveFolderName()" />
+        <p class="muted" style="margin-top:-4px; margin-bottom:10px;" id="admin-gdrive-folder-status">Under Strategic Wrestler / (folder name)</p>
+        <label>Local folder</label>
+        <button type="button" class="btn btn-gold" style="margin-top:4px;" onclick="pickLocalExportFolder()">Pick local folder</button>
+        <p class="muted" style="margin-top:6px; font-size:11px;">Uses existing <strong>Strategic Wrestler / MatScorer</strong> when present.</p>
+        <p class="muted" style="margin-top:6px;" id="admin-folder-status"></p>
+        <button type="button" class="btn btn-green" style="margin-top:10px;" onclick="driveSyncLocalToCloud()">Drive Sync</button>
+        <p class="muted" style="margin-top:6px; font-size:11px;">Upload all local MatScorer match JSON + videos to Google Drive.</p>
       </div>
 
             <div class="card">
@@ -1098,19 +1139,7 @@
         <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearAdminRoster()">Clear roster</button>
       </div>
       
-      <div class="card">
-        <div class="card-title">Save locations</div>
-        <p class="muted" style="margin-bottom:10px;">Default path: <strong>Strategic Wrestler / MatScorer</strong> on Google Drive and locally when linked.</p>
-        <label>Google Drive folder name</label>
-        <input id="gdrive-folder-name" class="input" placeholder="MatScorer" onchange="saveGdriveFolderName()" />
-        <p class="muted" style="margin-top:-4px; margin-bottom:10px;" id="admin-gdrive-folder-status">Under Strategic Wrestler / (folder name)</p>
-        <label>Local folder</label>
-        <button type="button" class="btn btn-gold" style="margin-top:4px;" onclick="pickLocalExportFolder()">Pick local folder</button>
-        <p class="muted" style="margin-top:6px; font-size:11px;">Creates <strong>Strategic Wrestler / MatScorer</strong> under the folder you pick (if missing).</p>
-        <p class="muted" style="margin-top:6px;" id="admin-folder-status"></p>
-        <button type="button" class="btn btn-green" style="margin-top:10px;" onclick="driveSyncLocalToCloud()">Drive Sync</button>
-        <p class="muted" style="margin-top:6px; font-size:11px;">Upload all local MatScorer match JSON + videos to Google Drive.</p>
-      </div>
+      
       
       <div class="card">
         <div class="card-title">Backup &amp; data</div>
@@ -1129,6 +1158,15 @@
     <div class="card">
       <div class="card-title">About</div>
       <p class="muted" style="margin-top:8px;" id="admin-build"></p>
+    </div>
+  </div>
+
+  
+  <div class="score-log-modal" id="score-log-modal" onclick="if(event.target===this)closeScoreLog()">
+    <div class="score-log-card" onclick="event.stopPropagation()">
+      <button type="button" class="score-log-close" onclick="closeScoreLog()" title="Close">×</button>
+      <div class="sl-title">Score Log</div>
+      <div class="score-log-body" id="score-log-body"></div>
     </div>
   </div>
 
@@ -1297,32 +1335,97 @@
     function shortName(n, fallback) { n = String(n || fallback || "").trim(); if (n.length <= 12) return n || fallback; return n.slice(0, 11) + "…"; }
     function escHtml(s) { return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+    function openMatScorerDataDb() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open("sw-matscorer-data", 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    async function idbSet(key, value) {
+      try {
+        const db = await openMatScorerDataDb();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction("kv", "readwrite");
+          tx.objectStore("kv").put(value, key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        try { db.close(); } catch (e) {}
+      } catch (e) { console.warn("idbSet", e); }
+    }
+    async function idbGet(key) {
+      try {
+        const db = await openMatScorerDataDb();
+        const val = await new Promise((resolve, reject) => {
+          const tx = db.transaction("kv", "readonly");
+          const q = tx.objectStore("kv").get(key);
+          q.onsuccess = () => resolve(q.result);
+          q.onerror = () => reject(q.error);
+        });
+        try { db.close(); } catch (e) {}
+        return val;
+      } catch (e) {
+        console.warn("idbGet", e);
+        return null;
+      }
+    }
+    function normalizeStoreShape() {
+      if (typeof store.showZoomButtons !== "boolean") store.showZoomButtons = false;
+      if (!Array.isArray(store.events)) store.events = [];
+      if (!Array.isArray(store.roster)) store.roster = [];
+      if (store.gdriveFolder === "MatSide") store.gdriveFolder = "MatScorer";
+      if (store.importWeeks == null) store.importWeeks = 1;
+      store.gapiClientId = HARDCODED_CLIENT_ID;
+    }
+    function applyStoreData(data) {
+      if (!data || typeof data !== "object") return false;
+      store = Object.assign({}, store, data);
+      normalizeStoreShape();
+      return true;
+    }
     function loadStore() {
       try {
         let raw = localStorage.getItem(STORE_KEY);
         if (!raw) raw = localStorage.getItem("sw-matside-v1");
         if (!raw) raw = localStorage.getItem("sw-matscorer-v1");
-        if (raw) {
-          const data = JSON.parse(raw);
-          store = Object.assign({}, store, data);
-          if (typeof store.showZoomButtons !== "boolean") store.showZoomButtons = false;
-          if (!Array.isArray(store.events)) store.events = [];
-          if (!Array.isArray(store.roster)) store.roster = [];
-          if (store.gdriveFolder === "MatSide") store.gdriveFolder = "MatScorer";
-          if (store.importWeeks == null) store.importWeeks = 1;
-        }
+        if (raw) applyStoreData(JSON.parse(raw));
       } catch (e) { console.warn("loadStore", e); }
-      store.gapiClientId = HARDCODED_CLIENT_ID;
+      normalizeStoreShape();
       try { applyShowZoomButtons(); } catch (e) {}
     }
-
+    async function loadStoreAsync() {
+      // Prefer IndexedDB (more reliable in installed Android PWAs)
+      try {
+        const fromIdb = await idbGet("store");
+        if (fromIdb && typeof fromIdb === "object") {
+          applyStoreData(fromIdb);
+          // Mirror back to localStorage
+          try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) {}
+        } else {
+          loadStore();
+          // Seed IDB from localStorage if present
+          try { await idbSet("store", store); } catch (e) {}
+        }
+      } catch (e) {
+        loadStore();
+      }
+      normalizeStoreShape();
+      try { applyShowZoomButtons(); } catch (e) {}
+      try { updateAdminUI(); } catch (e) {}
+    }
     function saveStore() {
       try {
         store.gapiClientId = HARDCODED_CLIENT_ID;
         const payload = JSON.stringify(store);
-        localStorage.setItem(STORE_KEY, payload);
-        // Mirror key for older builds / recovery
+        try { localStorage.setItem(STORE_KEY, payload); } catch (e2) {}
         try { localStorage.setItem("sw-matscorer-v1", payload); } catch (e2) {}
+        // Fire-and-forget IDB persist
+        try { idbSet("store", JSON.parse(payload)); } catch (e3) {}
       } catch (e) {
         try { toast("Storage full — free space or export a backup"); } catch (e3) {}
       }
@@ -1331,6 +1434,10 @@
     function showScreen(id) {
       document.querySelectorAll(".screen, #screen-live").forEach(el => el.classList.remove("active"));
       const el = document.getElementById(id); if (el) el.classList.add("active");
+      try {
+        const fab = document.querySelector(".fab-add");
+        if (fab) fab.style.display = (id === "screen-event") ? "" : "none";
+      } catch (e) {}
       const isLive = id === "screen-live"; document.body.classList.toggle("live-active", isLive);
       try { applyShowZoomButtons(); } catch (e) {}
       if (isLive) {
@@ -1427,9 +1534,17 @@
 
     function markAppInstalled() {
       try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
+      try { sessionStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
+      try { idbSet("pwa-installed", "1"); } catch (e) {}
+      window._msInstalled = true;
     }
     function isAppInstallRemembered() {
-      try { return localStorage.getItem("matscorer-pwa-installed") === "1"; } catch (e) { return false; }
+      try {
+        if (window._msInstalled) return true;
+        if (sessionStorage.getItem("matscorer-pwa-installed") === "1") return true;
+        if (localStorage.getItem("matscorer-pwa-installed") === "1") return true;
+      } catch (e) {}
+      return false;
     }
     function updateInstallButtonVisibility() {
       try {
@@ -3383,6 +3498,46 @@ function openEventList() {
       return !term;
     }
 
+    async 
+    function openScoreLog() {
+      try {
+        // Pause recording/clock like REC pause
+        if (typeof matchAwaitingStart !== "undefined" && matchAwaitingStart) {
+          toast("Start the match first");
+          return;
+        }
+        if (typeof recording !== "undefined" && recording && typeof recPaused !== "undefined" && !recPaused) {
+          try { toggleRecordingPause(); } catch (e) {}
+        }
+        const body = document.getElementById("score-log-body");
+        const modal = document.getElementById("score-log-modal");
+        if (!body || !modal) return;
+        const events = (live && Array.isArray(live.events)) ? live.events : [];
+        if (!events.length) {
+          body.innerHTML = `<p class="muted">No scoring events yet.</p>`;
+        } else {
+          body.innerHTML = events.map(e => {
+            const ts = escHtml(e.timestamp || "");
+            const per = escHtml(e.period || "");
+            if (e.category === "Period" || e.category === "Choice") {
+              return `<div class="sl-row choice">${ts} [${per}] ${escHtml(e.detail || e.move || e.category || "")}</div>`;
+            }
+            const who = e.direction === "offense" ? "US" : "OPP";
+            const pts = e.points ? (" +" + e.points) : "";
+            return `<div class="sl-row">${ts} ${per} ${who} ${escHtml(e.move || e.category || "")}${pts}</div>`;
+          }).join("");
+        }
+        modal.classList.add("open");
+      } catch (e) {
+        console.warn(e);
+        toast("Could not open score log");
+      }
+    }
+    function closeScoreLog() {
+      const modal = document.getElementById("score-log-modal");
+      if (modal) modal.classList.remove("open");
+    }
+
     async function endLiveMatch() {
       if (matchAwaitingStart) { toast("Tap Ready to start match first"); return; }
       if (matchIsTiedForUtb()) {
@@ -3759,7 +3914,6 @@ function openEventList() {
       if (build) build.textContent = "Build " + MAT_SCORER_BUILD;
     }
 
-    async     
     async function driveSyncLocalToCloud() {
       if (!isDriveConnected()) return alert("Authorize Google Drive first.");
       if (!exportDirHandle) return alert("Pick a local folder first (Save locations).");
@@ -4471,9 +4625,16 @@ async function resolveMatScorerDir(handle) {
     initGoogleClient();
     renderHome();
     try { updateInstallButtonVisibility(); } catch (e) {}
-    // Restore local folder handle (PWA / Chrome)
     (async function () {
       try {
+        // Restore install flag from IDB
+        const inst = await idbGet("pwa-installed");
+        if (inst === "1") {
+          window._msInstalled = true;
+          try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
+        }
+        if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) markAppInstalled();
+        await loadStoreAsync();
         if (typeof restoreExportDirHandle === "function") {
           const h = await restoreExportDirHandle();
           if (h) {
@@ -4485,9 +4646,10 @@ async function resolveMatScorerDir(handle) {
       } catch (e) { console.warn(e); }
       try { updateAdminUI(); } catch (e) {}
       try { updateInstallButtonVisibility(); } catch (e) {}
+      try { renderHome(); } catch (e) {}
     })();
-    // Persist on hide / close
     window.addEventListener("pagehide", function () { try { saveStore(); } catch (e) {} });
+    window.addEventListener("beforeunload", function () { try { saveStore(); } catch (e) {} });
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "hidden") { try { saveStore(); } catch (e) {} }
     });
