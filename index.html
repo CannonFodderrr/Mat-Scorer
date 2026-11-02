@@ -1155,6 +1155,9 @@
     const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
     let tokenClient;
     let gapiInited = false;
+    let googleInitPromise = null;
+    let pendingDriveAuth = false;
+    var driveImportMode = null;
 
     let store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", gdriveFolder: "MatScorer", demoMode: false, seasonMeta: null, gapiClientId: HARDCODED_CLIENT_ID, weightClasses: null , showZoomButtons: false };
     let driveFolderId = null;
@@ -3945,56 +3948,84 @@ async function pickLocalExportFolder() {
       return downloadPackageAll();
     }
     async function initGoogleClient() {
-      if (typeof gapi === "undefined" || typeof google === "undefined" || !google.accounts) {
-        const gd = document.getElementById("gdrive-status");
-        if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded — refresh page</div>`;
-        return;
-      }
-      gapi.load("client", async () => {
-        try {
-          await gapi.client.init({
-            discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
-          });
-          gapiInited = true;
-          tokenClient = google.accounts.oauth2.initTokenClient({
-            client_id: HARDCODED_CLIENT_ID,
-            scope: SCOPES,
-            callback: (tokenResponse) => {
-              if (tokenResponse.error !== undefined) {
-                console.error(tokenResponse);
-                toast("Auth failed: " + (tokenResponse.error || "unknown"));
-                return;
-              }
-              try { gapi.client.setToken(tokenResponse); } catch (e) {}
-              driveFolderId = null;
-              updateAdminUI();
-              toast("Google Drive authorized");
-            }
-          });
-          updateAdminUI();
-        } catch (e) {
-          console.error(e);
+      if (googleInitPromise) return googleInitPromise;
+      googleInitPromise = new Promise((resolve) => {
+        if (typeof gapi === "undefined" || typeof google === "undefined" || !google.accounts) {
           const gd = document.getElementById("gdrive-status");
-          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Authorized JavaScript origins</div>`;
+          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded — refresh page</div>`;
+          googleInitPromise = null;
+          setTimeout(() => { try { initGoogleClient(); } catch (e) {} }, 400);
+          resolve(false);
+          return;
         }
+        gapi.load("client", async () => {
+          try {
+            await gapi.client.init({
+              discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
+            });
+            gapiInited = true;
+            tokenClient = google.accounts.oauth2.initTokenClient({
+              client_id: HARDCODED_CLIENT_ID,
+              scope: SCOPES,
+              callback: (tokenResponse) => {
+                if (tokenResponse.error !== undefined) {
+                  console.error(tokenResponse);
+                  toast("Auth failed: " + (tokenResponse.error || "unknown"));
+                  return;
+                }
+                try { gapi.client.setToken(tokenResponse); } catch (e) {}
+                driveFolderId = null;
+                updateAdminUI();
+                toast("Google Drive authorized");
+              }
+            });
+            updateAdminUI();
+            resolve(true);
+            if (pendingDriveAuth) {
+              pendingDriveAuth = false;
+              try { requestDriveToken(); } catch (e) {}
+            }
+          } catch (e) {
+            console.error(e);
+            googleInitPromise = null;
+            const gd = document.getElementById("gdrive-status");
+            if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Authorized JavaScript origins</div>`;
+            resolve(false);
+          }
+        });
       });
+      return googleInitPromise;
     }
-    function authGoogleDrive() {
+    async function authGoogleDrive() {
       const folderEl = document.getElementById("gdrive-folder-name");
       if (folderEl && folderEl.value.trim()) store.gdriveFolder = folderEl.value.trim();
       if (!store.gdriveFolder) store.gdriveFolder = "MatScorer";
       store.gapiClientId = HARDCODED_CLIENT_ID;
       saveStore();
 
-      if (!tokenClient) {
-        initGoogleClient();
-        setTimeout(() => {
-          if (!tokenClient) return alert("Could not initialize Google client. Check Authorized JavaScript origins.");
-          requestDriveToken();
-        }, 700);
+      if (tokenClient) {
+        requestDriveToken();
         return;
       }
-      requestDriveToken();
+      toast("Connecting Google…");
+      pendingDriveAuth = true;
+      await initGoogleClient();
+      if (tokenClient) {
+        pendingDriveAuth = false;
+        requestDriveToken();
+        return;
+      }
+      for (let n = 0; n < 10 && !tokenClient; n++) {
+        await new Promise(r => setTimeout(r, 300));
+        if (!googleInitPromise) await initGoogleClient();
+      }
+      if (tokenClient) {
+        pendingDriveAuth = false;
+        requestDriveToken();
+      } else {
+        pendingDriveAuth = false;
+        alert("Could not initialize Google client yet. Wait a second and tap Authorize again. If it keeps failing, check Authorized JavaScript origins for this site URL.");
+      }
     }
     function requestDriveToken() {
       try {
@@ -4098,7 +4129,7 @@ async function pickLocalExportFolder() {
     }
 
     // ─── Drive import picker ────────────────────────────────────────
-    let driveImportMode = null;
+
     async function listDriveJsonFiles() {
       const token = getDriveAccessToken();
       if (!token) return [];
@@ -4180,8 +4211,12 @@ async function pickLocalExportFolder() {
       if (modal) modal.style.display = "none";
     }
     async function openDriveImport(mode) {
+      if (typeof driveImportMode === "undefined") {
+        try { window.driveImportMode = null; } catch (e) {}
+      }
       if (!isDriveConnected()) {
         alert("Authorize Google Drive in Admin first, then try again.");
+        try { await authGoogleDrive(); } catch (e) {}
         return;
       }
       driveImportMode = mode;
@@ -4238,7 +4273,11 @@ async function pickLocalExportFolder() {
         }
         closeDriveImport();
         if (mode === "roster") {
+          const before = (store.roster || []).length;
           importRosterData(data);
+          const after = (store.roster || []).length;
+          toast(after ? ("Roster loaded · " + after + " athletes") : "Roster import finished (0 athletes found)");
+          try { updateAdminUI(); } catch (e) {}
         } else if (mode === "event") {
           const before = (store.events || []).length;
           importEventData(data);
