@@ -1249,28 +1249,11 @@
       
       
       
-      <div class="card">
-        <div class="card-title">Backup &amp; data</div>
-        <p class="muted" id="admin-data-info" style="margin-bottom:10px;"></p>
-        <p class="muted" style="margin-bottom:10px;">Full backup of events, roster, and settings (not videos). Use restore to load a backup on this or another device.</p>
-        <button type="button" class="btn btn-green" onclick="exportAllLocalData()">Download full backup (JSON)</button>
-        <div class="btn-row" style="margin-top:8px;">
-          <button type="button" class="btn btn-ghost" style="margin-top:0;" onclick="document.getElementById('admin-backup-file').click()">Restore · device</button>
-          <button type="button" class="btn btn-gold" style="margin-top:0;" onclick="openDriveImport('backup')">Restore · Drive</button>
-        </div>
-        <input type="file" id="admin-backup-file" class="input" accept="application/json,.json" style="display:none;" />
-        <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearAllEvents()">Clear all events</button>
-        <button type="button" class="btn btn-red" style="margin-top:8px;" onclick="clearStoredVideos()">Clear stored videos</button>
-      </div>
     </div>
-    <div class="card">
-      <div class="card-title">About</div>
-      <p id="ms-storage-status" role="status">Loading saved data…</p>
-      <p id="ms-persistence-detail" class="muted"></p>
-      <button type="button" class="btn btn-ghost" onclick="requestPersistentStorage()">Protect device storage</button>
-      <button type="button" class="btn btn-ghost" onclick="reconnectExportFolder()">Restore remembered folder access</button>
-      <p class="muted" style="margin-top:8px;" id="admin-build"></p>
-    </div>
+    <p class="muted" style="margin:4px 2px 12px;font-size:11px;">Roster, events, scores, and admin settings save automatically on this device (IndexedDB) and reload when you reopen MatScorer.</p>
+    <!-- Device data auto-saves to IndexedDB and reloads on open. -->
+    <p id="ms-storage-status" class="muted" style="display:none;" aria-hidden="true"></p>
+    <p id="ms-persistence-detail" class="muted" style="display:none;" aria-hidden="true"></p>
   </div>
 
   
@@ -1295,7 +1278,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v1.2-drive.file-persist";
+    const MAT_SCORER_BUILD = "v1.3-idb-autosave";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -1448,36 +1431,40 @@
     function escHtml(s) { return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
     function openMatScorerDataDb() {
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open("sw-matscorer-data", 1);
-        req.onupgradeneeded = () => {
-          const db = req.result;
+      return new Promise(function (resolve, reject) {
+        var req = indexedDB.open("sw-matscorer-data", 2);
+        req.onupgradeneeded = function () {
+          var db = req.result;
           if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
         };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { reject(req.error || new Error("IndexedDB open failed")); };
       });
     }
     async function idbSet(key, value) {
       try {
-        const db = await openMatScorerDataDb();
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction("kv", "readwrite");
+        var db = await openMatScorerDataDb();
+        await new Promise(function (resolve, reject) {
+          var tx = db.transaction("kv", "readwrite");
           tx.objectStore("kv").put(value, key);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = tx.onabort = function () { reject(tx.error || new Error("idbSet failed")); };
         });
         try { db.close(); } catch (e) {}
-      } catch (e) { console.warn("idbSet", e); }
+        return true;
+      } catch (e) {
+        console.warn("idbSet", e);
+        return false;
+      }
     }
     async function idbGet(key) {
       try {
-        const db = await openMatScorerDataDb();
-        const val = await new Promise((resolve, reject) => {
-          const tx = db.transaction("kv", "readonly");
-          const q = tx.objectStore("kv").get(key);
-          q.onsuccess = () => resolve(q.result);
-          q.onerror = () => reject(q.error);
+        var db = await openMatScorerDataDb();
+        var val = await new Promise(function (resolve, reject) {
+          var tx = db.transaction("kv", "readonly");
+          var q = tx.objectStore("kv").get(key);
+          q.onsuccess = function () { resolve(q.result); };
+          q.onerror = function () { reject(q.error); };
         });
         try { db.close(); } catch (e) {}
         return val;
@@ -1486,7 +1473,38 @@
         return null;
       }
     }
+    async function writeStoreStrict(value) {
+      var db = await openMatScorerDataDb();
+      try {
+        await new Promise(function (resolve, reject) {
+          var tx = db.transaction("kv", "readwrite");
+          tx.objectStore("kv").put(value, "store");
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = tx.onabort = function () { reject(tx.error || new Error("Database write aborted")); };
+        });
+      } finally {
+        try { db.close(); } catch (e) {}
+      }
+    }
+    async function readStoreStrict() {
+      var db = await openMatScorerDataDb();
+      try {
+        return await new Promise(function (resolve, reject) {
+          var tx = db.transaction("kv", "readonly");
+          var q = tx.objectStore("kv").get("store");
+          var value;
+          q.onsuccess = function () { value = q.result; };
+          tx.oncomplete = function () { resolve(value); };
+          tx.onerror = tx.onabort = function () { reject(tx.error || new Error("Database read aborted")); };
+        });
+      } finally {
+        try { db.close(); } catch (e) {}
+      }
+    }
     function normalizeStoreShape() {
+      if (!store || typeof store !== "object") {
+        store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", gdriveFolder: "MatScorer", demoMode: false, seasonMeta: null, gapiClientId: HARDCODED_CLIENT_ID, weightClasses: null, showZoomButtons: false };
+      }
       if (typeof store.showZoomButtons !== "boolean") store.showZoomButtons = false;
       if (!Array.isArray(store.events)) store.events = [];
       if (!Array.isArray(store.roster)) store.roster = [];
@@ -1496,110 +1514,50 @@
     }
     function applyStoreData(data) {
       if (!data || typeof data !== "object") return false;
+      // Prefer structured clone via JSON to drop non-cloneable junk
+      try {
+        data = JSON.parse(JSON.stringify(data));
+      } catch (e) {}
       store = Object.assign({}, store, data);
       normalizeStoreShape();
       return true;
     }
+    function validStore(value) {
+      return !!(value && typeof value === "object");
+    }
+    /** Sync bootstrap from localStorage only (before IDB is ready). */
     function loadStore() {
       try {
-        let raw = localStorage.getItem(STORE_KEY);
-        if (!raw) raw = localStorage.getItem("sw-matside-v1");
+        var raw = localStorage.getItem(STORE_KEY);
         if (!raw) raw = localStorage.getItem("sw-matscorer-v1");
+        if (!raw) raw = localStorage.getItem("sw-matside-v1");
         if (raw) applyStoreData(JSON.parse(raw));
       } catch (e) { console.warn("loadStore", e); }
       normalizeStoreShape();
       try { applyShowZoomButtons(); } catch (e) {}
     }
-    let storageReady = false;
+    let storageReady = true; // saves never blocked
     let storageQueue = Promise.resolve();
     let storageLastError = "";
     let matchFinalizing = false;
     function storageStatus(message, failed) {
-      const el = document.getElementById("ms-storage-status");
-      if (el) { el.textContent = message; el.style.color = failed ? "#ffb4a8" : "#b8e0c8"; }
-    }
-    async function readStoreStrict() {
-      const db = await openMatScorerDataDb();
-      try {
-        return await new Promise((resolve, reject) => {
-          const tx = db.transaction("kv", "readonly");
-          const q = tx.objectStore("kv").get("store");
-          let value;
-          q.onsuccess = () => { value = q.result; };
-          tx.oncomplete = () => resolve(value);
-          tx.onerror = tx.onabort = () => reject(tx.error || new Error("Database read aborted"));
-        });
-      } finally { db.close(); }
-    }
-    async function writeStoreStrict(value) {
-      const db = await openMatScorerDataDb();
-      try {
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction("kv", "readwrite");
-          tx.objectStore("kv").put(value, "store");
-          tx.oncomplete = resolve;
-          tx.onerror = tx.onabort = () => reject(tx.error || new Error("Database write aborted"));
-        });
-      } finally { db.close(); }
-    }
-    function validStore(value) {
-      return value && typeof value === "object" &&
-        Array.isArray(value.events) && Array.isArray(value.roster);
-    }
-    async function loadStoreAsync() {
-      const candidates = [];
-      // 1) localStorage first (sync, reliable on Chrome)
-      for (const key of [...new Set([STORE_KEY, "sw-matscorer-v1", "sw-matside-v1"])]) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (!raw) continue;
-          const value = JSON.parse(raw);
-          if (value && typeof value === "object") {
-            if (!Array.isArray(value.events)) value.events = [];
-            if (!Array.isArray(value.roster)) value.roster = [];
-            candidates.push(value);
-          }
-        } catch (error) {
-          console.warn("localStorage store", key, error);
-        }
+      var el = document.getElementById("ms-storage-status");
+      if (el) {
+        el.textContent = message;
+        el.style.color = failed ? "#ffb4a8" : "#b8e0c8";
       }
-      // 2) IndexedDB
-      try {
-        const databaseValue = await Promise.race([
-          readStoreStrict(),
-          new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); })
-        ]);
-        if (databaseValue && typeof databaseValue === "object") {
-          if (!Array.isArray(databaseValue.events)) databaseValue.events = [];
-          if (!Array.isArray(databaseValue.roster)) databaseValue.roster = [];
-          candidates.push(databaseValue);
-        }
-      } catch (error) {
-        console.warn("IndexedDB store read", error);
-      }
-      candidates.sort(function (x, y) {
-        return (Number(y._savedAt) || 0) - (Number(x._savedAt) || 0);
-      });
-      if (candidates.length) {
-        try { applyStoreData(candidates[0]); }
-        catch (e) { console.warn("applyStoreData", e); }
-      }
-      try { normalizeStoreShape(); } catch (e) { console.warn(e); }
-      storageReady = true;
-      // Re-write so both localStorage and IDB hold the same snapshot
-      try { await saveStore(); } catch (e) { console.warn("initial saveStore", e); }
-      try { applyShowZoomButtons(); } catch (e) {}
-      try { updateAdminUI(); } catch (e) {}
     }
+    /**
+     * Primary persistence: IndexedDB key "store".
+     * Mirror copy in localStorage for fast startup.
+     */
     function saveStore() {
-      // Always persist — never block on storageReady (that flag was preventing saves).
-      let snapshot, payload, mirrorSaved = false;
+      var snapshot, payload, idbOk = false, lsOk = false;
       try {
-        if (typeof normalizeStoreShape === "function") normalizeStoreShape();
+        normalizeStoreShape();
         store.gapiClientId = HARDCODED_CLIENT_ID;
         store._savedAt = Math.max(Date.now(), (Number(store._savedAt) || 0) + 1);
-        store._schemaVersion = 2;
-        // Remember mapped folder name even if FileSystemHandle cannot be restored
+        store._schemaVersion = 3;
         try {
           if (exportDirHandle && exportDirHandle.name) {
             store.localFolderName = exportDirHandle.name;
@@ -1610,25 +1568,29 @@
         snapshot = JSON.parse(payload);
         try {
           localStorage.setItem(STORE_KEY, payload);
-          // legacy aliases
           try { localStorage.setItem("sw-matscorer-v1", payload); } catch (e2) {}
-          mirrorSaved = true;
+          lsOk = true;
         } catch (error) {
-          console.warn("localStorage save failed", error);
+          console.warn("localStorage mirror failed", error);
         }
       } catch (error) {
         console.error("saveStore snapshot", error);
         try { storageStatus("Save failed: " + error.message, true); } catch (e) {}
         return Promise.resolve(false);
       }
-      try { storageStatus(mirrorSaved ? "Saved on this device…" : "Saving…", false); } catch (e) {}
-      storageReady = true;
       storageQueue = storageQueue.catch(function () {}).then(async function () {
         try {
           await writeStoreStrict(snapshot);
+          // Also stash under a second key for redundancy
+          try { await idbSet("store-backup", snapshot); } catch (e) {}
+          idbOk = true;
           storageLastError = "";
           try {
-            storageStatus("Saved · " + new Date(snapshot._savedAt).toLocaleTimeString(), false);
+            storageStatus(
+              "Saved on this device · " + new Date(snapshot._savedAt).toLocaleTimeString() +
+              (lsOk ? "" : " (no localStorage)"),
+              false
+            );
           } catch (e) {}
           return true;
         } catch (error) {
@@ -1636,17 +1598,53 @@
           storageLastError = error && error.message ? error.message : String(error);
           try {
             storageStatus(
-              mirrorSaved
-                ? "Saved in browser storage (IndexedDB failed)"
-                : "NOT SAVED — check browser storage permissions",
-              !mirrorSaved
+              lsOk ? "Saved in localStorage only (IndexedDB failed)" : "NOT SAVED",
+              !lsOk
             );
           } catch (e) {}
-          return mirrorSaved;
+          return lsOk;
         }
       });
       return storageQueue;
     }
+    /** Load: IndexedDB primary, then localStorage fallback. */
+    async function loadStoreAsync() {
+      var candidates = [];
+      try {
+        var fromIdb = await Promise.race([
+          readStoreStrict(),
+          new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 4000); })
+        ]);
+        if (validStore(fromIdb)) candidates.push(fromIdb);
+      } catch (e) {
+        console.warn("IDB primary read", e);
+      }
+      try {
+        var bak = await idbGet("store-backup");
+        if (validStore(bak)) candidates.push(bak);
+      } catch (e) {}
+      for (var key of [STORE_KEY, "sw-matscorer-v1", "sw-matside-v1"]) {
+        try {
+          var raw = localStorage.getItem(key);
+          if (!raw) continue;
+          var value = JSON.parse(raw);
+          if (validStore(value)) candidates.push(value);
+        } catch (e) {}
+      }
+      candidates.sort(function (a, b) {
+        return (Number(b._savedAt) || 0) - (Number(a._savedAt) || 0);
+      });
+      if (candidates.length) {
+        try { applyStoreData(candidates[0]); } catch (e) { console.warn(e); }
+      }
+      normalizeStoreShape();
+      storageReady = true;
+      // Ensure IDB has a copy after open (migrates localStorage-only data into IDB)
+      try { await saveStore(); } catch (e) { console.warn(e); }
+      try { applyShowZoomButtons(); } catch (e) {}
+      try { updateAdminUI(); } catch (e) {}
+    }
+
     async function requestPersistentStorage() {
       try {
         if (navigator.storage && navigator.storage.persist) {
@@ -4665,8 +4663,7 @@ async function resolveMatScorerDir(handle) {
     // ─── Drive import picker ────────────────────────────────────────
 
     async function listDriveJsonFiles() {
-      // drive.file only: list JSON inside known Strategic Wrestler / MatScorer folders
-      // (app-created or previously opened). No whole-Drive search.
+      // drive.file only: SW exports for roster/events live under Strategic Wrestler / Exports
       const token = getDriveAccessToken();
       if (!token) return [];
       const files = [];
@@ -4684,7 +4681,7 @@ async function resolveMatScorerDir(handle) {
         }
       }
       async function findFolderId(name, parentId) {
-        const safe = String(name || "").replace(/'/g, "\\'");
+        const safe = String(name || "").replace(/'/g, "\'");
         const q = parentId
           ? `name='${safe}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
           : `name='${safe}' and 'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
@@ -4701,18 +4698,19 @@ async function resolveMatScorerDir(handle) {
         });
       }
       try {
-        let msId = null;
-        try { msId = await ensureDriveFolder(null); } catch (e) { console.warn(e); }
-        if (msId) addFiles(await query(`'${msId}' in parents and trashed=false`));
-
         const swId = await findFolderId("Strategic Wrestler", null);
-        if (swId) {
-          addFiles(await query(`'${swId}' in parents and trashed=false`));
-          for (const sub of ["MatScorer", "Backups", "Exports", "Export", "Data", "Saves", "Archives"]) {
-            const subId = await findFolderId(sub, swId);
-            if (subId) addFiles(await query(`'${subId}' in parents and trashed=false`));
-          }
+        if (!swId) {
+          console.warn("Strategic Wrestler folder not found on Drive");
+          return [];
         }
+        // Prefer "Exports"; accept legacy "Export" folder name
+        let exportId = await findFolderId("Exports", swId);
+        if (!exportId) exportId = await findFolderId("Export", swId);
+        if (!exportId) {
+          console.warn("Strategic Wrestler / Exports folder not found");
+          return [];
+        }
+        addFiles(await query("'" + exportId + "' in parents and trashed=false"));
         files.sort((a, b) => String(b.modifiedTime || "").localeCompare(String(a.modifiedTime || "")));
       } catch (e) {
         console.error(e);
@@ -4758,13 +4756,13 @@ async function resolveMatScorerDir(handle) {
         backup: "Restore backup from Drive"
       };
       if (title) title.textContent = labels[mode] || "Import from Google Drive";
-      if (hint) hint.textContent = "Looking in Strategic Wrestler / MatScorer (and Backups, Exports)…";
+      if (hint) hint.textContent = "Looking in Strategic Wrestler / Exports…";
       list.innerHTML = `<p class="muted">Loading…</p>`;
       modal.style.display = "flex";
       try {
         const files = await listDriveJsonFiles();
         if (!files.length) {
-          list.innerHTML = `<p class="muted">No JSON files found.<br/><br/>Place a Strategic Wrestler export under <strong>Strategic Wrestler</strong> (Backups / Exports / MatScorer). Connect Drive once so MatScorer can create or reuse those folders, or switch Source to Local.</p>`;
+          list.innerHTML = `<p class="muted">No JSON files found.<br/><br/>Export from Strategic Wrestler into <strong>Strategic Wrestler / Exports</strong>, then try again. Or switch Source to Local.</p>`;
           if (hint) hint.textContent = "No matching files";
           return;
         }
