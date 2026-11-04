@@ -1517,39 +1517,42 @@
         Array.isArray(value.events) && Array.isArray(value.roster);
     }
     async function loadStoreAsync() {
-      let databaseValue, databaseError;
-      try { databaseValue = await readStoreStrict(); }
-      catch (error) { databaseError = error; }
+      let databaseValue = null;
+      try {
+        databaseValue = await Promise.race([
+          readStoreStrict(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("IndexedDB read timeout")), 4000))
+        ]);
+      } catch (error) {
+        console.warn("IndexedDB store read", error);
+      }
       const candidates = [];
       if (databaseValue != null) {
-        if (!validStore(databaseValue)) throw new Error("Saved database is invalid; automatic writes blocked.");
-        candidates.push(databaseValue);
+        if (validStore(databaseValue)) candidates.push(databaseValue);
+        else console.warn("Ignoring invalid IndexedDB store shape");
       }
-      let mirrorReadable = false;
       for (const key of [...new Set([STORE_KEY, "sw-matscorer-v1", "sw-matside-v1"])]) {
         try {
           const raw = localStorage.getItem(key);
-          mirrorReadable = true;
-          if (raw) {
-            const value = JSON.parse(raw);
-            if (!validStore(value)) throw new Error("Invalid saved data in " + key);
-            candidates.push(value);
-          }
+          if (!raw) continue;
+          const value = JSON.parse(raw);
+          if (validStore(value)) candidates.push(value);
+          else console.warn("Ignoring invalid localStorage store in", key);
         } catch (error) {
-          if (error instanceof SyntaxError || /Invalid saved data/.test(error.message)) throw error;
+          console.warn("localStorage store", key, error);
         }
       }
-      if (databaseError) throw databaseError;
-      if (!mirrorReadable && !databaseValue) {
-        console.warn("Local mirror unavailable; using IndexedDB only");
-      }
       candidates.sort((x, y) => (Number(y._savedAt) || 0) - (Number(x._savedAt) || 0));
-      if (candidates.length) applyStoreData(candidates[0]);
-      normalizeStoreShape();
+      if (candidates.length) {
+        try { applyStoreData(candidates[0]); }
+        catch (e) { console.warn("applyStoreData", e); }
+      }
+      // Always allow a fresh empty store when nothing valid is present
+      try { normalizeStoreShape(); } catch (e) { console.warn(e); }
       storageReady = true;
-      await saveStore();
-      applyShowZoomButtons();
-      updateAdminUI();
+      try { await saveStore(); } catch (e) { console.warn("initial saveStore", e); }
+      try { applyShowZoomButtons(); } catch (e) {}
+      try { updateAdminUI(); } catch (e) {}
     }
     function saveStore() {
       if (!storageReady) return Promise.resolve(false);
@@ -4847,37 +4850,88 @@ async function resolveMatScorerDir(handle) {
     renderHome();
     try { updateInstallButtonVisibility(); } catch (e) {}
     (async function () {
-      try {
-        // Restore install flag from IDB
-        const inst = await idbGet("pwa-installed");
-        if (inst === "1") {
-          window._msInstalled = true;
-          try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
-        }
-        if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) markAppInstalled();
-        await loadStoreAsync();
-        requestPersistentStorage();
-        if (typeof restoreExportDirHandle === "function") {
-          const h = await restoreExportDirHandle();
-          if (h) {
-            exportDirHandle = h;
-            const st = document.getElementById("admin-folder-status");
-            if (st) {
-              const permission = h.queryPermission ? await h.queryPermission({ mode: "readwrite" }) : "granted";
-              st.textContent = "Remembered: " + (h.name || "MatScorer") +
-                (permission === "granted" ? " — access granted" : " — tap Restore remembered folder access");
-            }
+      function clearStartupGate(msg) {
+        try {
+          const gate = document.getElementById("ms-startup-gate");
+          if (!gate) return;
+          if (msg) {
+            gate.innerHTML = '<div style="max-width:320px;margin:0 auto;">' +
+              '<p style="margin:0 0 12px;">' + String(msg).replace(/</g, "&lt;") + '</p>' +
+              '<button type="button" style="padding:12px 18px;border:none;border-radius:8px;background:#D9A441;color:#1C1F1E;font-weight:800;cursor:pointer;" onclick="this.closest(\'#ms-startup-gate\').remove()">Continue</button>' +
+              '</div>';
+          } else {
+            gate.remove();
           }
+        } catch (e) {
+          try { document.getElementById("ms-startup-gate")?.remove(); } catch (e2) {}
+        }
+      }
+      // Hard safety: never leave the black loading screen up forever
+      const gateWatch = setTimeout(function () {
+        if (!storageReady) {
+          try {
+            normalizeStoreShape();
+            storageReady = true;
+          } catch (e) {}
+        }
+        clearStartupGate("Startup is taking longer than expected. You can continue with a fresh session.");
+      }, 6000);
+      try {
+        try {
+          const inst = await Promise.race([
+            idbGet("pwa-installed"),
+            new Promise(function (r) { setTimeout(function () { r(null); }, 1500); })
+          ]);
+          if (inst === "1") {
+            window._msInstalled = true;
+            try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
+          }
+        } catch (e) {}
+        if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) {
+          try { markAppInstalled(); } catch (e) {}
+        }
+        await loadStoreAsync();
+        try { requestPersistentStorage(); } catch (e) {}
+        // Folder restore must not block the UI (queryPermission can hang without a gesture)
+        if (typeof restoreExportDirHandle === "function") {
+          Promise.race([
+            restoreExportDirHandle(),
+            new Promise(function (r) { setTimeout(function () { r(null); }, 2000); })
+          ]).then(async function (h) {
+            if (!h) return;
+            exportDirHandle = h;
+            try {
+              const st = document.getElementById("admin-folder-status");
+              if (st) {
+                let permission = "granted";
+                try {
+                  if (h.queryPermission) {
+                    permission = await Promise.race([
+                      h.queryPermission({ mode: "readwrite" }),
+                      new Promise(function (r) { setTimeout(function () { r("prompt"); }, 1500); })
+                    ]);
+                  }
+                } catch (e) { permission = "prompt"; }
+                st.textContent = "Remembered: " + (h.name || "MatScorer") +
+                  (permission === "granted" ? " — access granted" : " — tap Restore remembered folder access");
+              }
+            } catch (e) {}
+          }).catch(function () {});
         }
       } catch (e) {
         console.error("Startup restore failed", e);
         if (!storageReady) {
-          const gate = document.getElementById("ms-startup-gate");
-          gate.textContent = "Saved data could not be loaded. No automatic writes will run. Close and retry; do not clear site data. Error: " + e.message;
-          return;
+          try { normalizeStoreShape(); storageReady = true; } catch (e2) {}
         }
+        clearTimeout(gateWatch);
+        clearStartupGate("Could not fully restore saved data (" + (e && e.message ? e.message : e) + "). Continuing with available data.");
+        try { updateAdminUI(); } catch (e3) {}
+        try { updateInstallButtonVisibility(); } catch (e3) {}
+        try { renderHome(); } catch (e3) {}
+        return;
       }
-      document.getElementById("ms-startup-gate").remove();
+      clearTimeout(gateWatch);
+      clearStartupGate();
       try { updateAdminUI(); } catch (e) {}
       try { updateInstallButtonVisibility(); } catch (e) {}
       try { renderHome(); recoverActiveDraft(); } catch (e) { console.error(e); }
