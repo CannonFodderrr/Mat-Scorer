@@ -1547,71 +1547,102 @@
         Array.isArray(value.events) && Array.isArray(value.roster);
     }
     async function loadStoreAsync() {
-      let databaseValue = null;
-      try {
-        databaseValue = await Promise.race([
-          readStoreStrict(),
-          new Promise((_, rej) => setTimeout(() => rej(new Error("IndexedDB read timeout")), 4000))
-        ]);
-      } catch (error) {
-        console.warn("IndexedDB store read", error);
-      }
       const candidates = [];
-      if (databaseValue != null) {
-        if (validStore(databaseValue)) candidates.push(databaseValue);
-        else console.warn("Ignoring invalid IndexedDB store shape");
-      }
+      // 1) localStorage first (sync, reliable on Chrome)
       for (const key of [...new Set([STORE_KEY, "sw-matscorer-v1", "sw-matside-v1"])]) {
         try {
           const raw = localStorage.getItem(key);
           if (!raw) continue;
           const value = JSON.parse(raw);
-          if (validStore(value)) candidates.push(value);
-          else console.warn("Ignoring invalid localStorage store in", key);
+          if (value && typeof value === "object") {
+            if (!Array.isArray(value.events)) value.events = [];
+            if (!Array.isArray(value.roster)) value.roster = [];
+            candidates.push(value);
+          }
         } catch (error) {
           console.warn("localStorage store", key, error);
         }
       }
-      candidates.sort((x, y) => (Number(y._savedAt) || 0) - (Number(x._savedAt) || 0));
+      // 2) IndexedDB
+      try {
+        const databaseValue = await Promise.race([
+          readStoreStrict(),
+          new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); })
+        ]);
+        if (databaseValue && typeof databaseValue === "object") {
+          if (!Array.isArray(databaseValue.events)) databaseValue.events = [];
+          if (!Array.isArray(databaseValue.roster)) databaseValue.roster = [];
+          candidates.push(databaseValue);
+        }
+      } catch (error) {
+        console.warn("IndexedDB store read", error);
+      }
+      candidates.sort(function (x, y) {
+        return (Number(y._savedAt) || 0) - (Number(x._savedAt) || 0);
+      });
       if (candidates.length) {
         try { applyStoreData(candidates[0]); }
         catch (e) { console.warn("applyStoreData", e); }
       }
-      // Always allow a fresh empty store when nothing valid is present
       try { normalizeStoreShape(); } catch (e) { console.warn(e); }
       storageReady = true;
+      // Re-write so both localStorage and IDB hold the same snapshot
       try { await saveStore(); } catch (e) { console.warn("initial saveStore", e); }
       try { applyShowZoomButtons(); } catch (e) {}
       try { updateAdminUI(); } catch (e) {}
     }
     function saveStore() {
-      if (!storageReady) return Promise.resolve(false);
+      // Always persist — never block on storageReady (that flag was preventing saves).
       let snapshot, payload, mirrorSaved = false;
       try {
+        if (typeof normalizeStoreShape === "function") normalizeStoreShape();
         store.gapiClientId = HARDCODED_CLIENT_ID;
         store._savedAt = Math.max(Date.now(), (Number(store._savedAt) || 0) + 1);
         store._schemaVersion = 2;
+        // Remember mapped folder name even if FileSystemHandle cannot be restored
+        try {
+          if (exportDirHandle && exportDirHandle.name) {
+            store.localFolderName = exportDirHandle.name;
+            store.exportPath = store.exportPath || ("Strategic Wrestler / " + exportDirHandle.name);
+          }
+        } catch (e) {}
         payload = JSON.stringify(store);
         snapshot = JSON.parse(payload);
-        try { localStorage.setItem(STORE_KEY, payload); mirrorSaved = true; }
-        catch (error) { console.warn("Storage mirror", error); }
+        try {
+          localStorage.setItem(STORE_KEY, payload);
+          // legacy aliases
+          try { localStorage.setItem("sw-matscorer-v1", payload); } catch (e2) {}
+          mirrorSaved = true;
+        } catch (error) {
+          console.warn("localStorage save failed", error);
+        }
       } catch (error) {
-        storageStatus("Save failed: " + error.message, true);
+        console.error("saveStore snapshot", error);
+        try { storageStatus("Save failed: " + error.message, true); } catch (e) {}
         return Promise.resolve(false);
       }
-      storageStatus("Saving on this device…", false);
-      storageQueue = storageQueue.catch(() => {}).then(async () => {
+      try { storageStatus(mirrorSaved ? "Saved on this device…" : "Saving…", false); } catch (e) {}
+      storageReady = true;
+      storageQueue = storageQueue.catch(function () {}).then(async function () {
         try {
           await writeStoreStrict(snapshot);
           storageLastError = "";
-          storageStatus("Saved on this device · " + new Date(snapshot._savedAt).toLocaleTimeString(), false);
+          try {
+            storageStatus("Saved · " + new Date(snapshot._savedAt).toLocaleTimeString(), false);
+          } catch (e) {}
           return true;
         } catch (error) {
-          console.error("Database save failed", error);
-          storageLastError = error.message;
-          storageStatus(mirrorSaved ? "Backup mirror saved; database failed — export a backup" : "NOT SAVED — export a backup", true);
-          toast("Database save failed — export a backup in Admin");
-          return false;
+          console.error("IndexedDB save failed", error);
+          storageLastError = error && error.message ? error.message : String(error);
+          try {
+            storageStatus(
+              mirrorSaved
+                ? "Saved in browser storage (IndexedDB failed)"
+                : "NOT SAVED — check browser storage permissions",
+              !mirrorSaved
+            );
+          } catch (e) {}
+          return mirrorSaved;
         }
       });
       return storageQueue;
@@ -4294,6 +4325,11 @@ async function resolveMatScorerDir(handle) {
         const label = (exportDirHandle && exportDirHandle.name) ? exportDirHandle.name : "MatScorer";
         if (st) st.innerHTML = `<span style="color:var(--green);">Linked:</span> Strategic Wrestler / ${escHtml(label)}`;
         toast("Local folder linked (existing folders reused)");
+        try {
+          store.localFolderName = label;
+          store.exportPath = "Strategic Wrestler / " + label;
+        } catch (e) {}
+        try { await saveStore(); } catch (e) {}
         try { await ensureLocalMatScorerTree(); } catch (e) {}
         try { updateAdminUI(); } catch (e) {}
       } catch (e) {
@@ -4875,6 +4911,7 @@ async function resolveMatScorerDir(handle) {
     }
 
     try { loadStore(); } catch (e) { console.warn("loadStore", e); }
+    try { storageReady = true; } catch (e) {}
     try {
       var tm = document.getElementById("top-meta");
       if (tm) tm.title = "Build " + MAT_SCORER_BUILD;
