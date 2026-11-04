@@ -1249,7 +1249,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v1.8-idb-android";
+    const MAT_SCORER_BUILD = "v1.9-no-hang";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -1403,13 +1403,42 @@
 
     function openMatScorerDataDb() {
       return new Promise(function (resolve, reject) {
-        var req = indexedDB.open("sw-matscorer-data", 2);
-        req.onupgradeneeded = function () {
-          var db = req.result;
-          if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
-        };
-        req.onsuccess = function () { resolve(req.result); };
-        req.onerror = function () { reject(req.error || new Error("IndexedDB open failed")); };
+        var settled = false;
+        var timer = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          reject(new Error("IndexedDB open timeout"));
+        }, 2500);
+        try {
+          var req = indexedDB.open("sw-matscorer-data", 2);
+          req.onupgradeneeded = function () {
+            var db = req.result;
+            if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+          };
+          req.onsuccess = function () {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(req.result);
+          };
+          req.onerror = function () {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(req.error || new Error("IndexedDB open failed"));
+          };
+          req.onblocked = function () {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(new Error("IndexedDB open blocked"));
+          };
+        } catch (e) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(e);
+        }
       });
     }
     async function idbSet(key, value) {
@@ -1463,12 +1492,40 @@
       var db = await openMatScorerDataDb();
       try {
         return await new Promise(function (resolve, reject) {
-          var tx = db.transaction("kv", "readonly");
-          var q = tx.objectStore("kv").get("store");
-          // Resolve on onsuccess — some Android WebViews never fire tx.oncomplete for readonly txns
-          q.onsuccess = function () { resolve(q.result); };
-          q.onerror = function () { reject(q.error || new Error("Database read aborted")); };
-          tx.onerror = tx.onabort = function () { reject(tx.error || new Error("Database read aborted")); };
+          var settled = false;
+          var timer = setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            try { db.close(); } catch (e) {}
+            resolve(null); // timeout = treat as empty, do not hang startup
+          }, 2000);
+          try {
+            var tx = db.transaction("kv", "readonly");
+            var q = tx.objectStore("kv").get("store");
+            q.onsuccess = function () {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              resolve(q.result);
+            };
+            q.onerror = function () {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              reject(q.error || new Error("Database read aborted"));
+            };
+            tx.onerror = tx.onabort = function () {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              reject(tx.error || new Error("Database read aborted"));
+            };
+          } catch (e) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(e);
+          }
         });
       } finally {
         try { db.close(); } catch (e) {}
@@ -1605,22 +1662,7 @@
         var score = countData(data) * 1e15 + (Number(data._savedAt) || 0);
         if (score > bestScore) { bestScore = score; best = data; bestSrc = src; }
       }
-      // Chromebook: IndexedDB may not answer on the first tick — retry like a delayed manual reload
-      var attempts = opts.attempts != null ? opts.attempts : 8;
-      var fromIdb = null;
-      for (var attempt = 1; attempt <= attempts; attempt++) {
-        try {
-          fromIdb = await readStoreStrict();
-          if (fromIdb && typeof fromIdb === "object") {
-            consider("idb", fromIdb);
-            if (countData(fromIdb) > 0) break;
-          }
-        } catch (e) {
-          console.warn("[MatScorer] IDB attempt " + attempt, e);
-        }
-        await new Promise(function (r) { setTimeout(r, 40 * attempt); });
-      }
-      try { consider("idb-backup", await idbGet("store-backup")); } catch (e) {}
+      // Always prefer localStorage first (sync, never hangs)
       try {
         ["sw-matscorer-v1", STORE_KEY, "sw-matside-v1"].forEach(function (key) {
           try {
@@ -1629,6 +1671,26 @@
           } catch (e) {}
         });
       } catch (e) {}
+      // Then IDB (max 2 attempts — each read has its own 2s timeout)
+      var attempts = opts.attempts != null ? Math.min(opts.attempts, 3) : 2;
+      for (var attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          var fromIdb = await readStoreStrict();
+          if (fromIdb && typeof fromIdb === "object") {
+            consider("idb", fromIdb);
+            if (countData(fromIdb) > 0) break;
+          }
+        } catch (e) {
+          console.warn("[MatScorer] IDB attempt " + attempt, e);
+        }
+      }
+      try {
+        var bak = await Promise.race([
+          idbGet("store-backup"),
+          new Promise(function (r) { setTimeout(function () { r(null); }, 1500); })
+        ]);
+        consider("idb-backup", bak);
+      } catch (e) {}
       if (best) {
         applyStoreData(best);
         console.info("[MatScorer] restored from", bestSrc, "roster=", store.roster.length, "events=", store.events.length);
@@ -1636,7 +1698,7 @@
           var payload = JSON.stringify(store);
           localStorage.setItem(STORE_KEY, payload);
           localStorage.setItem("sw-matscorer-v1", payload);
-        } catch (e) { console.warn(e); }
+        } catch (e) {}
         if (countData(store) > 0 && !opts.silent) {
           try {
             toast("Restored " + store.roster.length + " athletes · " + store.events.length + " events");
@@ -1654,6 +1716,7 @@
       try { updateHomeDataBadge(); } catch (e) {}
       return countData(store);
     }
+
     function updateHomeDataBadge() {
       var el = document.getElementById("home-data-badge");
       if (!el) return;
@@ -4647,6 +4710,7 @@ async function resolveMatScorerDir(handle) {
 
     try { window.__msStoreHydrated = false; } catch (e) {}
     try { loadStore(); } catch (e) { console.warn("loadStore", e); }
+    try { updateHomeDataBadge(); } catch (e) {}
     // hydrate + storageReady set in loadStoreAsync
     try {
       var tm = document.getElementById("top-meta");
@@ -4657,8 +4721,12 @@ async function resolveMatScorerDir(handle) {
     try { updateInstallButtonVisibility(); } catch (e) {}
     (async function () {
       try {
+        try { updateHomeDataBadge(); } catch (e) {}
         try {
-          var inst = await idbGet("pwa-installed");
+          var inst = await Promise.race([
+            idbGet("pwa-installed"),
+            new Promise(function (r) { setTimeout(function () { r(null); }, 1000); })
+          ]);
           if (inst === "1") {
             window._msInstalled = true;
             try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
@@ -4667,22 +4735,17 @@ async function resolveMatScorerDir(handle) {
         if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) {
           try { markAppInstalled(); } catch (e) {}
         }
-        // Automatic path = same as the old manual "Reload saved data" button
         window.__msStoreHydrated = false;
-        var n = await loadStoreAsync({ attempts: 10 });
-        if (!n) {
-          for (var i = 0; i < 5; i++) {
-            await new Promise(function (r) { setTimeout(r, [150, 400, 800, 1500, 2500][i]); });
-            window.__msStoreHydrated = false;
-            n = await loadStoreAsync({ attempts: 5, silent: true });
-            if (n > 0) {
-              try {
-                toast("Restored " + store.roster.length + " athletes · " + store.events.length + " events");
-              } catch (e) {}
-              break;
-            }
-          }
+        // Hard ceiling so home never stays on "Loading device data…"
+        await Promise.race([
+          loadStoreAsync({ attempts: 2 }),
+          new Promise(function (r) { setTimeout(r, 5000); })
+        ]);
+        if (!window.__msStoreHydrated) {
+          window.__msStoreHydrated = true;
+          storageReady = true;
         }
+        try { updateHomeDataBadge(); } catch (e) {}
         try { requestPersistentStorage(); } catch (e) {}
         if (typeof restoreExportDirHandle === "function") {
           restoreExportDirHandle().then(function (h) {
@@ -4692,6 +4755,7 @@ async function resolveMatScorerDir(handle) {
       } catch (e) {
         console.error("Startup restore failed", e);
         try { window.__msStoreHydrated = true; storageReady = true; } catch (e2) {}
+        try { updateHomeDataBadge(); } catch (e2) {}
       }
       try { updateAdminUI(); } catch (e) {}
       try { updateInstallButtonVisibility(); } catch (e) {}
