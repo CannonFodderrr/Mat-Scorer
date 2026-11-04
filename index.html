@@ -1248,7 +1248,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v1.4-load-fix";
+    const MAT_SCORER_BUILD = "v1.4.1-async-fix";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -3762,8 +3762,7 @@ function openEventList() {
       return !term;
     }
 
-    async 
-    function openScoreLog() {
+    async function openScoreLog() {
       try {
         // Pause recording/clock like REC pause
         if (typeof matchAwaitingStart !== "undefined" && matchAwaitingStart) {
