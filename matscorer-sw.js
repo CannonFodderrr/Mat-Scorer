@@ -1,6 +1,6 @@
 /* MatScorer persistence release. Application records remain in IndexedDB. */
 const CACHE_PREFIX = "matscorer-offline-";
-const CACHE_NAME = CACHE_PREFIX + "v33-startup-gate-fix";
+const CACHE_NAME = CACHE_PREFIX + "v34-gate-unkillable";
 const SHELL = ["./", "./index.html", "./MatScorer.html", "./matscorer-icon-180.png", "./matscorer-icon-192.png", "./matscorer-icon-512.png", "./matscorer-icon-512-maskable.png"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.all(
@@ -18,8 +18,25 @@ self.addEventListener("fetch", event => {
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin ||
       !url.href.startsWith(self.registration.scope)) return;
+  // HTML navigations: network-first so updates are not stuck behind old cache
+  const isNav = request.mode === "navigate" || (request.headers.get("accept") || "").includes("text/html");
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
+    if (isNav) {
+      try {
+        const response = await fetch(request, { cache: "no-store" });
+        if (response && response.ok) {
+          try { await cache.put(request, response.clone()); } catch (e) {}
+          return response;
+        }
+      } catch (e) {}
+      const cached = await cache.match(request) ||
+        await cache.match(new URL("./index.html", self.registration.scope).href) ||
+        await cache.match(new URL("./MatScorer.html", self.registration.scope).href);
+      return cached || new Response("MatScorer offline and not cached yet.", {
+        status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
+    }
     try {
       const response = await fetch(request);
       if (response.ok) {
@@ -30,13 +47,7 @@ self.addEventListener("fetch", event => {
       const cached = await cache.match(request);
       return cached || response;
     } catch (error) {
-      let cached = await cache.match(request);
-      if (!cached && request.mode === "navigate") {
-        for (const path of ["./", "./index.html", "./MatScorer.html"]) {
-          cached = await cache.match(new URL(path, self.registration.scope).href);
-          if (cached) break;
-        }
-      }
+      const cached = await cache.match(request);
       return cached || new Response("MatScorer is not cached yet. Connect once and reopen the app.", {
         status:503, headers:{"Content-Type":"text/plain; charset=utf-8"}
       });

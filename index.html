@@ -895,7 +895,37 @@
     </style>
 </head>
 <body>
-  <div id="ms-startup-gate" role="status" style="position:fixed;inset:0;z-index:2147483647;background:#1C1F1E;color:#F2F0EA;padding:32px;display:grid;place-content:center;text-align:center">Loading saved MatScorer data…</div>
+  <div id="ms-startup-gate" role="status" style="position:fixed;inset:0;z-index:2147483647;background:#1C1F1E;color:#F2F0EA;padding:32px;display:grid;place-content:center;text-align:center">
+    <div style="max-width:320px;margin:0 auto;">
+      <p id="ms-startup-gate-msg" style="margin:0 0 14px;font-size:15px;">Loading saved MatScorer data…</p>
+      <button type="button" id="ms-startup-gate-btn" style="display:none;padding:12px 18px;border:none;border-radius:8px;background:#D9A441;color:#1C1F1E;font-weight:800;cursor:pointer;">Continue</button>
+    </div>
+  </div>
+  <script>
+  (function () {
+    function killGate() {
+      try {
+        var g = document.getElementById("ms-startup-gate");
+        if (g) g.remove();
+      } catch (e) {}
+    }
+    try {
+      var btn = document.getElementById("ms-startup-gate-btn");
+      if (btn) btn.onclick = killGate;
+    } catch (e) {}
+    // Always show Continue after 2.5s even if main app JS fails
+    setTimeout(function () {
+      try {
+        var btn = document.getElementById("ms-startup-gate-btn");
+        var msg = document.getElementById("ms-startup-gate-msg");
+        if (btn) btn.style.display = "inline-block";
+        if (msg) msg.textContent = "Still loading… tap Continue to open MatScorer.";
+      } catch (e) {}
+    }, 2500);
+    // Absolute fallback: force-remove gate after 8s
+    setTimeout(killGate, 8000);
+  })();
+  </script>
   <div class="topbar" id="topbar">
     <div class="topbar-left">
       <button type="button" class="hdr-btn hidden" id="back-btn" onclick="goBack()">← Back</button>
@@ -4844,26 +4874,54 @@ async function resolveMatScorerDir(handle) {
       });
     }
 
-    loadStore();
-    document.getElementById("top-meta").title = "Build " + MAT_SCORER_BUILD;
-    initGoogleClient();
-    renderHome();
+    try { loadStore(); } catch (e) { console.warn("loadStore", e); }
+    try {
+      var tm = document.getElementById("top-meta");
+      if (tm) tm.title = "Build " + MAT_SCORER_BUILD;
+    } catch (e) {}
+    try { initGoogleClient(); } catch (e) { console.warn("initGoogleClient", e); }
+    try { renderHome(); } catch (e) { console.warn("renderHome", e); }
     try { updateInstallButtonVisibility(); } catch (e) {}
+    // Ensure gate cannot stick if later async work never runs
+    try {
+      setTimeout(function () {
+        try {
+          if (!window.__msGateCleared) {
+            var g = document.getElementById("ms-startup-gate");
+            if (g) {
+              var msg = document.getElementById("ms-startup-gate-msg");
+              var btn = document.getElementById("ms-startup-gate-btn");
+              if (msg) msg.textContent = "Ready — tap Continue if the screen stays here.";
+              if (btn) btn.style.display = "inline-block";
+            }
+          }
+        } catch (e) {}
+      }, 1500);
+    } catch (e) {}
     (async function () {
       function clearStartupGate(msg) {
+        try { window.__msGateCleared = true; } catch (e) {}
         try {
           const gate = document.getElementById("ms-startup-gate");
           if (!gate) return;
           if (msg) {
-            gate.innerHTML = '<div style="max-width:320px;margin:0 auto;">' +
-              '<p style="margin:0 0 12px;">' + String(msg).replace(/</g, "&lt;") + '</p>' +
-              '<button type="button" style="padding:12px 18px;border:none;border-radius:8px;background:#D9A441;color:#1C1F1E;font-weight:800;cursor:pointer;" onclick="this.closest(\'#ms-startup-gate\').remove()">Continue</button>' +
-              '</div>';
+            const msgEl = document.getElementById("ms-startup-gate-msg");
+            const btn = document.getElementById("ms-startup-gate-btn");
+            if (msgEl) msgEl.textContent = String(msg);
+            if (btn) {
+              btn.style.display = "inline-block";
+              btn.onclick = function () { try { gate.remove(); } catch (e) {} };
+            } else {
+              gate.remove();
+            }
           } else {
             gate.remove();
           }
         } catch (e) {
-          try { document.getElementById("ms-startup-gate")?.remove(); } catch (e2) {}
+          try {
+            const g = document.getElementById("ms-startup-gate");
+            if (g) g.remove();
+          } catch (e2) {}
         }
       }
       // Hard safety: never leave the black loading screen up forever
