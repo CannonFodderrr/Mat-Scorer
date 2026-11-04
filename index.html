@@ -895,37 +895,7 @@
     </style>
 </head>
 <body>
-  <div id="ms-startup-gate" role="status" style="position:fixed;inset:0;z-index:2147483647;background:#1C1F1E;color:#F2F0EA;padding:32px;display:grid;place-content:center;text-align:center">
-    <div style="max-width:320px;margin:0 auto;">
-      <p id="ms-startup-gate-msg" style="margin:0 0 14px;font-size:15px;">Loading saved MatScorer data…</p>
-      <button type="button" id="ms-startup-gate-btn" style="display:none;padding:12px 18px;border:none;border-radius:8px;background:#D9A441;color:#1C1F1E;font-weight:800;cursor:pointer;">Continue</button>
-    </div>
-  </div>
-  <script>
-  (function () {
-    function killGate() {
-      try {
-        var g = document.getElementById("ms-startup-gate");
-        if (g) g.remove();
-      } catch (e) {}
-    }
-    try {
-      var btn = document.getElementById("ms-startup-gate-btn");
-      if (btn) btn.onclick = killGate;
-    } catch (e) {}
-    // Always show Continue after 2.5s even if main app JS fails
-    setTimeout(function () {
-      try {
-        var btn = document.getElementById("ms-startup-gate-btn");
-        var msg = document.getElementById("ms-startup-gate-msg");
-        if (btn) btn.style.display = "inline-block";
-        if (msg) msg.textContent = "Still loading… tap Continue to open MatScorer.";
-      } catch (e) {}
-    }, 2500);
-    // Absolute fallback: force-remove gate after 8s
-    setTimeout(killGate, 8000);
-  })();
-  </script>
+
   <div class="topbar" id="topbar">
     <div class="topbar-left">
       <button type="button" class="hdr-btn hidden" id="back-btn" onclick="goBack()">← Back</button>
@@ -1278,7 +1248,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v1.3-idb-autosave";
+    const MAT_SCORER_BUILD = "v1.4-load-fix";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -1609,40 +1579,55 @@
     }
     /** Load: IndexedDB primary, then localStorage fallback. */
     async function loadStoreAsync() {
+      function scoreCandidate(c) {
+        if (!c || typeof c !== "object") return -1;
+        var ev = Array.isArray(c.events) ? c.events.length : 0;
+        var ro = Array.isArray(c.roster) ? c.roster.length : 0;
+        var ts = Number(c._savedAt) || 0;
+        // Prefer non-empty data heavily over empty shells with newer timestamps
+        return (ev + ro) * 1e15 + ts;
+      }
       var candidates = [];
       try {
         var fromIdb = await Promise.race([
           readStoreStrict(),
-          new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 4000); })
+          new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 3000); })
         ]);
-        if (validStore(fromIdb)) candidates.push(fromIdb);
-      } catch (e) {
-        console.warn("IDB primary read", e);
-      }
+        if (fromIdb && typeof fromIdb === "object") candidates.push({ src: "idb", data: fromIdb });
+      } catch (e) { console.warn("IDB read", e); }
       try {
         var bak = await idbGet("store-backup");
-        if (validStore(bak)) candidates.push(bak);
+        if (bak && typeof bak === "object") candidates.push({ src: "idb-backup", data: bak });
       } catch (e) {}
-      for (var key of [STORE_KEY, "sw-matscorer-v1", "sw-matside-v1"]) {
+      ["sw-matscorer-v1", STORE_KEY, "sw-matside-v1"].forEach(function (key) {
         try {
           var raw = localStorage.getItem(key);
-          if (!raw) continue;
+          if (!raw) return;
           var value = JSON.parse(raw);
-          if (validStore(value)) candidates.push(value);
+          if (value && typeof value === "object") candidates.push({ src: "ls:" + key, data: value });
         } catch (e) {}
-      }
-      candidates.sort(function (a, b) {
-        return (Number(b._savedAt) || 0) - (Number(a._savedAt) || 0);
       });
+      candidates.sort(function (a, b) { return scoreCandidate(b.data) - scoreCandidate(a.data); });
       if (candidates.length) {
-        try { applyStoreData(candidates[0]); } catch (e) { console.warn(e); }
+        try {
+          applyStoreData(candidates[0].data);
+          console.info("[MatScorer] restored from", candidates[0].src,
+            "roster", (store.roster || []).length,
+            "events", (store.events || []).length);
+        } catch (e) { console.warn(e); }
+      } else {
+        console.info("[MatScorer] no saved store found — fresh session");
       }
       normalizeStoreShape();
       storageReady = true;
-      // Ensure IDB has a copy after open (migrates localStorage-only data into IDB)
-      try { await saveStore(); } catch (e) { console.warn(e); }
+      // Migrate into IDB only when we have real data
+      var hasData = (store.roster && store.roster.length) || (store.events && store.events.length);
+      if (hasData) {
+        try { await saveStore(); } catch (e) { console.warn(e); }
+      }
       try { applyShowZoomButtons(); } catch (e) {}
       try { updateAdminUI(); } catch (e) {}
+      try { renderHome(); } catch (e) {}
     }
 
     async function requestPersistentStorage() {
@@ -4917,64 +4902,10 @@ async function resolveMatScorerDir(handle) {
     try { initGoogleClient(); } catch (e) { console.warn("initGoogleClient", e); }
     try { renderHome(); } catch (e) { console.warn("renderHome", e); }
     try { updateInstallButtonVisibility(); } catch (e) {}
-    // Ensure gate cannot stick if later async work never runs
-    try {
-      setTimeout(function () {
-        try {
-          if (!window.__msGateCleared) {
-            var g = document.getElementById("ms-startup-gate");
-            if (g) {
-              var msg = document.getElementById("ms-startup-gate-msg");
-              var btn = document.getElementById("ms-startup-gate-btn");
-              if (msg) msg.textContent = "Ready — tap Continue if the screen stays here.";
-              if (btn) btn.style.display = "inline-block";
-            }
-          }
-        } catch (e) {}
-      }, 1500);
-    } catch (e) {}
     (async function () {
-      function clearStartupGate(msg) {
-        try { window.__msGateCleared = true; } catch (e) {}
-        try {
-          const gate = document.getElementById("ms-startup-gate");
-          if (!gate) return;
-          if (msg) {
-            const msgEl = document.getElementById("ms-startup-gate-msg");
-            const btn = document.getElementById("ms-startup-gate-btn");
-            if (msgEl) msgEl.textContent = String(msg);
-            if (btn) {
-              btn.style.display = "inline-block";
-              btn.onclick = function () { try { gate.remove(); } catch (e) {} };
-            } else {
-              gate.remove();
-            }
-          } else {
-            gate.remove();
-          }
-        } catch (e) {
-          try {
-            const g = document.getElementById("ms-startup-gate");
-            if (g) g.remove();
-          } catch (e2) {}
-        }
-      }
-      // Hard safety: never leave the black loading screen up forever
-      const gateWatch = setTimeout(function () {
-        if (!storageReady) {
-          try {
-            normalizeStoreShape();
-            storageReady = true;
-          } catch (e) {}
-        }
-        clearStartupGate("Startup is taking longer than expected. You can continue with a fresh session.");
-      }, 6000);
       try {
         try {
-          const inst = await Promise.race([
-            idbGet("pwa-installed"),
-            new Promise(function (r) { setTimeout(function () { r(null); }, 1500); })
-          ]);
+          var inst = await idbGet("pwa-installed");
           if (inst === "1") {
             window._msInstalled = true;
             try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
@@ -4985,46 +4916,15 @@ async function resolveMatScorerDir(handle) {
         }
         await loadStoreAsync();
         try { requestPersistentStorage(); } catch (e) {}
-        // Folder restore must not block the UI (queryPermission can hang without a gesture)
+        // Restore folder handle in background (permission may need a later tap)
         if (typeof restoreExportDirHandle === "function") {
-          Promise.race([
-            restoreExportDirHandle(),
-            new Promise(function (r) { setTimeout(function () { r(null); }, 2000); })
-          ]).then(async function (h) {
-            if (!h) return;
-            exportDirHandle = h;
-            try {
-              const st = document.getElementById("admin-folder-status");
-              if (st) {
-                let permission = "granted";
-                try {
-                  if (h.queryPermission) {
-                    permission = await Promise.race([
-                      h.queryPermission({ mode: "readwrite" }),
-                      new Promise(function (r) { setTimeout(function () { r("prompt"); }, 1500); })
-                    ]);
-                  }
-                } catch (e) { permission = "prompt"; }
-                st.textContent = "Remembered: " + (h.name || "MatScorer") +
-                  (permission === "granted" ? " — access granted" : " — tap Restore remembered folder access");
-              }
-            } catch (e) {}
+          restoreExportDirHandle().then(function (h) {
+            if (h) exportDirHandle = h;
           }).catch(function () {});
         }
       } catch (e) {
         console.error("Startup restore failed", e);
-        if (!storageReady) {
-          try { normalizeStoreShape(); storageReady = true; } catch (e2) {}
-        }
-        clearTimeout(gateWatch);
-        clearStartupGate("Could not fully restore saved data (" + (e && e.message ? e.message : e) + "). Continuing with available data.");
-        try { updateAdminUI(); } catch (e3) {}
-        try { updateInstallButtonVisibility(); } catch (e3) {}
-        try { renderHome(); } catch (e3) {}
-        return;
       }
-      clearTimeout(gateWatch);
-      clearStartupGate();
       try { updateAdminUI(); } catch (e) {}
       try { updateInstallButtonVisibility(); } catch (e) {}
       try { renderHome(); recoverActiveDraft(); } catch (e) { console.error(e); }
