@@ -150,14 +150,21 @@
     .screen {
       flex: 1 1 auto;
       min-height: 0;
+      height: 100%;
+      overflow-x: hidden;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
       padding: 12px;
-      padding-bottom: calc(16px + var(--safeBottom));
+      padding-bottom: calc(120px + var(--safeBottom));
       display: none;
     }
-    .screen.active { display: block; }
+    .screen.active {
+      display: block;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
 
     .card { background: var(--panel); border: 1px solid var(--panelLine); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
     .card-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: var(--gold); margin-bottom: 10px; }
@@ -273,7 +280,18 @@
     .dual-side.opp .dual-pts { color: #ff8f7a; }
     .dual-mid { font-size: 11px; font-weight: 800; color: var(--gold); text-transform: uppercase; letter-spacing: 1px; text-align: center; }
 
-    .fab-add { position: sticky; bottom: calc(12px + var(--safeBottom)); margin-top: 16px; width: 100%; padding-top: 8px; }
+    .fab-add {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(12px + var(--safeBottom));
+      width: min(520px, calc(100% - 24px));
+      z-index: 40;
+      margin: 0;
+      padding: 0;
+      pointer-events: none;
+    }
+    .fab-add .btn { pointer-events: auto; width: 100%; box-shadow: 0 4px 16px rgba(0,0,0,0.45); }
 
     #screen-live {
       display: none; position: relative; flex-direction: column; padding: 0; overflow: hidden;
@@ -877,6 +895,7 @@
     </style>
 </head>
 <body>
+  <div id="ms-startup-gate" role="status" style="position:fixed;inset:0;z-index:2147483647;background:#1C1F1E;color:#F2F0EA;padding:32px;display:grid;place-content:center;text-align:center">Loading saved MatScorer data…</div>
   <div class="topbar" id="topbar">
     <div class="topbar-left">
       <button type="button" class="hdr-btn hidden" id="back-btn" onclick="goBack()">← Back</button>
@@ -1216,6 +1235,10 @@
     </div>
     <div class="card">
       <div class="card-title">About</div>
+      <p id="ms-storage-status" role="status">Loading saved data…</p>
+      <p id="ms-persistence-detail" class="muted"></p>
+      <button type="button" class="btn btn-ghost" onclick="requestPersistentStorage()">Protect device storage</button>
+      <button type="button" class="btn btn-ghost" onclick="reconnectExportFolder()">Restore remembered folder access</button>
       <p class="muted" style="margin-top:8px;" id="admin-build"></p>
     </div>
   </div>
@@ -1242,11 +1265,11 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "2026-11-01-ms-v30";
+    const MAT_SCORER_BUILD = "v1.2-drive.file-persist";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
-    const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';
+    const SCOPES = 'https://www.googleapis.com/auth/drive.file';
     let tokenClient;
     let gapiInited = false;
     let googleInitPromise = null;
@@ -1457,37 +1480,152 @@
       normalizeStoreShape();
       try { applyShowZoomButtons(); } catch (e) {}
     }
-    async function loadStoreAsync() {
-      // Prefer IndexedDB (more reliable in installed Android PWAs)
+    let storageReady = false;
+    let storageQueue = Promise.resolve();
+    let storageLastError = "";
+    let matchFinalizing = false;
+    function storageStatus(message, failed) {
+      const el = document.getElementById("ms-storage-status");
+      if (el) { el.textContent = message; el.style.color = failed ? "#ffb4a8" : "#b8e0c8"; }
+    }
+    async function readStoreStrict() {
+      const db = await openMatScorerDataDb();
       try {
-        const fromIdb = await idbGet("store");
-        if (fromIdb && typeof fromIdb === "object") {
-          applyStoreData(fromIdb);
-          // Mirror back to localStorage
-          try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) {}
-        } else {
-          loadStore();
-          // Seed IDB from localStorage if present
-          try { await idbSet("store", store); } catch (e) {}
-        }
-      } catch (e) {
-        loadStore();
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction("kv", "readonly");
+          const q = tx.objectStore("kv").get("store");
+          let value;
+          q.onsuccess = () => { value = q.result; };
+          tx.oncomplete = () => resolve(value);
+          tx.onerror = tx.onabort = () => reject(tx.error || new Error("Database read aborted"));
+        });
+      } finally { db.close(); }
+    }
+    async function writeStoreStrict(value) {
+      const db = await openMatScorerDataDb();
+      try {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction("kv", "readwrite");
+          tx.objectStore("kv").put(value, "store");
+          tx.oncomplete = resolve;
+          tx.onerror = tx.onabort = () => reject(tx.error || new Error("Database write aborted"));
+        });
+      } finally { db.close(); }
+    }
+    function validStore(value) {
+      return value && typeof value === "object" &&
+        Array.isArray(value.events) && Array.isArray(value.roster);
+    }
+    async function loadStoreAsync() {
+      let databaseValue, databaseError;
+      try { databaseValue = await readStoreStrict(); }
+      catch (error) { databaseError = error; }
+      const candidates = [];
+      if (databaseValue != null) {
+        if (!validStore(databaseValue)) throw new Error("Saved database is invalid; automatic writes blocked.");
+        candidates.push(databaseValue);
       }
+      let mirrorReadable = false;
+      for (const key of [...new Set([STORE_KEY, "sw-matscorer-v1", "sw-matside-v1"])]) {
+        try {
+          const raw = localStorage.getItem(key);
+          mirrorReadable = true;
+          if (raw) {
+            const value = JSON.parse(raw);
+            if (!validStore(value)) throw new Error("Invalid saved data in " + key);
+            candidates.push(value);
+          }
+        } catch (error) {
+          if (error instanceof SyntaxError || /Invalid saved data/.test(error.message)) throw error;
+        }
+      }
+      if (databaseError) throw databaseError;
+      if (!mirrorReadable && !databaseValue) {
+        console.warn("Local mirror unavailable; using IndexedDB only");
+      }
+      candidates.sort((x, y) => (Number(y._savedAt) || 0) - (Number(x._savedAt) || 0));
+      if (candidates.length) applyStoreData(candidates[0]);
       normalizeStoreShape();
-      try { applyShowZoomButtons(); } catch (e) {}
-      try { updateAdminUI(); } catch (e) {}
+      storageReady = true;
+      await saveStore();
+      applyShowZoomButtons();
+      updateAdminUI();
     }
     function saveStore() {
+      if (!storageReady) return Promise.resolve(false);
+      let snapshot, payload, mirrorSaved = false;
       try {
         store.gapiClientId = HARDCODED_CLIENT_ID;
-        const payload = JSON.stringify(store);
-        try { localStorage.setItem(STORE_KEY, payload); } catch (e2) {}
-        try { localStorage.setItem("sw-matscorer-v1", payload); } catch (e2) {}
-        // Fire-and-forget IDB persist
-        try { idbSet("store", JSON.parse(payload)); } catch (e3) {}
-      } catch (e) {
-        try { toast("Storage full — free space or export a backup"); } catch (e3) {}
+        store._savedAt = Math.max(Date.now(), (Number(store._savedAt) || 0) + 1);
+        store._schemaVersion = 2;
+        payload = JSON.stringify(store);
+        snapshot = JSON.parse(payload);
+        try { localStorage.setItem(STORE_KEY, payload); mirrorSaved = true; }
+        catch (error) { console.warn("Storage mirror", error); }
+      } catch (error) {
+        storageStatus("Save failed: " + error.message, true);
+        return Promise.resolve(false);
       }
+      storageStatus("Saving on this device…", false);
+      storageQueue = storageQueue.catch(() => {}).then(async () => {
+        try {
+          await writeStoreStrict(snapshot);
+          storageLastError = "";
+          storageStatus("Saved on this device · " + new Date(snapshot._savedAt).toLocaleTimeString(), false);
+          return true;
+        } catch (error) {
+          console.error("Database save failed", error);
+          storageLastError = error.message;
+          storageStatus(mirrorSaved ? "Backup mirror saved; database failed — export a backup" : "NOT SAVED — export a backup", true);
+          toast("Database save failed — export a backup in Admin");
+          return false;
+        }
+      });
+      return storageQueue;
+    }
+    async function requestPersistentStorage() {
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          const granted = await navigator.storage.persisted() || await navigator.storage.persist();
+          const el = document.getElementById("ms-persistence-detail");
+          if (el) el.textContent = granted ? "Browser storage protection: granted." : "Browser storage protection not granted. Keep external backups.";
+        }
+      } catch (error) { console.warn("Persistent storage request", error); }
+    }
+    function saveActiveDraft() {
+      if (!storageReady || matchFinalizing || !live || !live.matchId || !document.body.classList.contains("live-active")) return;
+      store.activeDraft = {
+        live: JSON.parse(JSON.stringify(live)), elapsed: effectiveRecordSec(),
+        awaitingStart: matchAwaitingStart, savedAt: Date.now()
+      };
+      saveStore();
+    }
+    function recoverActiveDraft() {
+      const draft = store.activeDraft;
+      if (!draft || !draft.live) return;
+      const ev = store.events.find(e => e.id === draft.live.eventId);
+      const match = ev && (ev.matches || []).find(m => m.id === draft.live.matchId);
+      if (!match || match.status === "scored") return;
+      if (!confirm("An unfinished match was recovered. Resume its score and log? Video buffered before closing cannot be restored; resume is scoring-only.")) return;
+      live = draft.live;
+      currentEventId = live.eventId; currentMatchId = live.matchId;
+      mediaStream = null; mediaRecorder = null; recordedChunks = [];
+      recording = false; recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0;
+      matchAwaitingStart = !!draft.awaitingStart;
+      recordStartedAt = matchAwaitingStart ? 0 : Date.now() - (Number(draft.elapsed) || 0) * 1000;
+      matchStartedAt = recordStartedAt;
+      live._frozenRecSec = null;
+      navStack = ["home", "event-list", "event"];
+      showScreen("screen-live");
+      document.getElementById("live-our-name").textContent = shortName(live.wrestlerName, "Us");
+      document.getElementById("live-opp-name").textContent = shortName(live.opponent, "Opp");
+      document.getElementById("live-our-label").textContent = live.wrestlerName || "Us";
+      document.getElementById("live-opp-label").textContent = live.opponent || "Opp";
+      document.getElementById("live-our-pts").textContent = String(live.ourP);
+      document.getElementById("live-opp-pts").textContent = String(live.oppP);
+      setPeriod(live.period); setStartOverlayVisible(matchAwaitingStart);
+      renderOverlayControls(); startRecClock();
+      toast("Score recovered — scoring only, no previous video");
     }
 
     function showScreen(id) {
@@ -2600,6 +2738,7 @@ function openEventList() {
     }
 
     async function startLiveMatchFromSetup(ev, match) {
+      matchFinalizing = false;
       live = {
         boutId: ev.id, wrestlerId: match.wrestlerId, wrestlerName: match.wrestlerName, opponent: match.opponent, level: match.level, weightClass: match.weightClass,
         style: ev.style || (store.seasonMeta && store.seasonMeta.style) || "Folkstyle", period: "P1", events: [], ourP: 0, oppP: 0, penOur: 0, penOpp: 0, stallOur: 0, stallOpp: 0, cautionOur: 0, cautionOpp: 0, dq: null, deferredOnce: false, undoStack: [], lastNote: "Match started",
@@ -3364,6 +3503,7 @@ function openEventList() {
     }
 
     function renderOverlayControls() {
+      saveActiveDraft();
       if (!live) return;
       fitLiveViewport();
       const host = document.getElementById("overlay-controls");
@@ -3624,12 +3764,14 @@ function openEventList() {
       } else if (!confirm("End match and save?")) {
         return;
       }
+      if (matchFinalizing) return;
+      matchFinalizing = true;
       clearInterval(recTimer); const videoBlob = await stopRecorder(); recording = false; matchAwaitingStart = false; setStartOverlayVisible(false);
       if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; } try { resetCameraZoom(); } catch (e) {}
 
       const packageId = uid();
       const dateStr = live.boutMeta && live.boutMeta.date ? live.boutMeta.date : new Date().toISOString().slice(0, 10);
-      const base = matchFileBase(live.wrestlerName, live.opponent, dateStr);
+      const base = matchFileBase(live.wrestlerName, live.opponent, dateStr) + "_" + packageId;
       const videoExt = (videoBlob && videoBlob.type && videoBlob.type.includes("mp4")) ? ".mp4" : ".webm";
       const evFolder = eventFolderName((live.boutMeta && (live.boutMeta.opponentTeam || live.boutMeta.type)) || "Event", dateStr);
 
@@ -3652,7 +3794,8 @@ function openEventList() {
           m.teamOur = tp.our; m.teamOpp = tp.opp; m.hasVideo = !!videoBlob; m.videoFileName = json.video.fileName; m.videoId = packageId;
         }
       }
-      saveStore();
+      delete store.activeDraft;
+      await saveStore();
 
       if (videoBlob) {
         await saveVideoBlob(packageId, videoBlob, json.video.fileName, { wrestlerName: live.wrestlerName, opponent: live.opponent, eventId: live.eventId, matchId: live.matchId });
@@ -3674,16 +3817,18 @@ function openEventList() {
       if (!lastPackage) return;
       showSaveOverlay(true, "Saving match files…");
       let autoMsgs = [];
+      let localJsonSaved = false, localVideoSaved = !lastPackage.videoBlob;
       try {
         const jsonBlob = new Blob([JSON.stringify(lastPackage.json, null, 2)], { type: "application/json" });
         if (await writeBlobToExportDir(jsonBlob, lastPackage.jsonName, lastPackage.evFolder)) {
-          lastPackage.savedLocal = true;
+          localJsonSaved = true;
         }
         if (lastPackage.videoBlob) {
           if (await writeBlobToExportDir(lastPackage.videoBlob, lastPackage.videoName, lastPackage.evFolder)) {
-            lastPackage.savedLocal = true;
+            localVideoSaved = true;
           }
         }
+        lastPackage.savedLocal = localJsonSaved && localVideoSaved;
         if (lastPackage.savedLocal) autoMsgs.push("local folder");
       } catch (e) { console.warn(e); }
       try {
@@ -4049,26 +4194,25 @@ async function resolveMatScorerDir(handle) {
       return await sw.getDirectoryHandle("MatScorer", { create: true });
     }
     async function persistExportDirHandle(handle) {
-      if (!handle || !window.indexedDB) return;
+      if (!handle || !window.indexedDB) throw new Error("Folder mapping cannot be saved on this browser");
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open("sw-matscorer-fs", 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains("handles")) req.result.createObjectStore("handles");
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
       try {
-        const db = await new Promise((resolve, reject) => {
-          const req = indexedDB.open("sw-matscorer-fs", 1);
-          req.onupgradeneeded = () => {
-            const d = req.result;
-            if (!d.objectStoreNames.contains("handles")) d.createObjectStore("handles");
-          };
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
         await new Promise((resolve, reject) => {
           const tx = db.transaction("handles", "readwrite");
           tx.objectStore("handles").put(handle, "exportDir");
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = resolve;
+          tx.onerror = tx.onabort = () => reject(tx.error || new Error("Folder mapping write aborted"));
         });
-        try { db.close(); } catch (e) {}
-      } catch (e) { console.warn("persist folder handle", e); }
+      } finally { db.close(); }
     }
+
     async function restoreExportDirHandle() {
       if (!window.indexedDB) return null;
       try {
@@ -4089,18 +4233,23 @@ async function resolveMatScorerDir(handle) {
         });
         try { db.close(); } catch (e) {}
         if (!handle) return null;
-        if (handle.queryPermission) {
-          let perm = await handle.queryPermission({ mode: "readwrite" });
-          if (perm !== "granted" && handle.requestPermission) {
-            perm = await handle.requestPermission({ mode: "readwrite" });
-          }
-          if (perm !== "granted") return null;
-        }
+        // Remember the handle even if permission must be renewed by a user gesture.
         return handle;
       } catch (e) {
         console.warn("restore folder handle", e);
         return null;
       }
+    }
+    async function reconnectExportFolder() {
+      if (!exportDirHandle) return pickLocalExportFolder();
+      try {
+        const permission = !exportDirHandle.requestPermission ? "granted" :
+          await exportDirHandle.requestPermission({ mode: "readwrite" });
+        if (permission !== "granted") { toast("Folder remembered; write access not granted"); return; }
+        toast("Remembered folder access restored");
+        const st = document.getElementById("admin-folder-status");
+        if (st) st.textContent = "Linked: " + exportDirHandle.name + " — access granted";
+      } catch (error) { alert("Could not restore folder access: " + error.message); }
     }
     async function pickLocalExportFolder() {
       if (!window.showDirectoryPicker) return alert("Folder picker needs Chrome or Edge (https or localhost).");
@@ -4123,6 +4272,10 @@ async function resolveMatScorerDir(handle) {
 
     async function writeBlobToExportDir(blob, name, eventFolderName) {
       if (!exportDirHandle || !blob) return false;
+      if (exportDirHandle.queryPermission && await exportDirHandle.queryPermission({ mode: "readwrite" }) !== "granted") {
+        toast("Folder remembered — restore folder access in Admin");
+        return false;
+      }
       try {
         // exportDirHandle is Strategic Wrestler/MatScorer (or legacy root)
         let msDir = exportDirHandle;
@@ -4443,6 +4596,8 @@ async function resolveMatScorerDir(handle) {
     // ─── Drive import picker ────────────────────────────────────────
 
     async function listDriveJsonFiles() {
+      // drive.file only: list JSON inside known Strategic Wrestler / MatScorer folders
+      // (app-created or previously opened). No whole-Drive search.
       const token = getDriveAccessToken();
       if (!token) return [];
       const files = [];
@@ -4460,9 +4615,10 @@ async function resolveMatScorerDir(handle) {
         }
       }
       async function findFolderId(name, parentId) {
+        const safe = String(name || "").replace(/'/g, "\\'");
         const q = parentId
-          ? `name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-          : `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+          ? `name='${safe}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+          : `name='${safe}' and 'root' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
         const found = await query(q);
         return found[0] ? found[0].id : null;
       }
@@ -4476,38 +4632,25 @@ async function resolveMatScorerDir(handle) {
         });
       }
       try {
-        // 1) MatScorer app folder (Strategic Wrestler / MatScorer)
         let msId = null;
         try { msId = await ensureDriveFolder(null); } catch (e) { console.warn(e); }
         if (msId) addFiles(await query(`'${msId}' in parents and trashed=false`));
 
-        // 2) Strategic Wrestler root + common subfolders (where SW exports live)
         const swId = await findFolderId("Strategic Wrestler", null);
         if (swId) {
           addFiles(await query(`'${swId}' in parents and trashed=false`));
-          for (const sub of ["MatScorer", "Backups", "Exports", "Export", "Data", "Saves"]) {
+          for (const sub of ["MatScorer", "Backups", "Exports", "Export", "Data", "Saves", "Archives"]) {
             const subId = await findFolderId(sub, swId);
             if (subId) addFiles(await query(`'${subId}' in parents and trashed=false`));
           }
         }
-
-        // 3) Broad name search for SW / MatScorer season packages
-        const nameQ = (
-          "trashed=false and (mimeType='application/json' or name contains '.json') and (" +
-          "name contains 'strategic' or name contains 'wrestler' or name contains 'matscorer' or " +
-          "name contains 'matside' or name contains 'mat-side' or name contains 'season' or " +
-          "name contains 'export' or name contains 'roster' or name contains 'bout' or name contains 'dual'" +
-          ")"
-        );
-        addFiles(await query(nameQ));
-
-        // Newest first
         files.sort((a, b) => String(b.modifiedTime || "").localeCompare(String(a.modifiedTime || "")));
       } catch (e) {
         console.error(e);
       }
       return files;
     }
+
     async function downloadDriveFileText(fileId) {
       const token = getDriveAccessToken();
       if (!token) throw new Error("Not authorized");
@@ -4546,13 +4689,13 @@ async function resolveMatScorerDir(handle) {
         backup: "Restore backup from Drive"
       };
       if (title) title.textContent = labels[mode] || "Import from Google Drive";
-      if (hint) hint.textContent = "Searching Strategic Wrestler + MatScorer folders…";
+      if (hint) hint.textContent = "Looking in Strategic Wrestler / MatScorer (and Backups, Exports)…";
       list.innerHTML = `<p class="muted">Loading…</p>`;
       modal.style.display = "flex";
       try {
         const files = await listDriveJsonFiles();
         if (!files.length) {
-          list.innerHTML = `<p class="muted">No JSON files found.<br/><br/>Place a Strategic Wrestler export in <strong>Strategic Wrestler</strong> or <strong>Strategic Wrestler / MatScorer</strong> on Drive, or switch Source to Local.</p>`;
+          list.innerHTML = `<p class="muted">No JSON files found.<br/><br/>Place a Strategic Wrestler export under <strong>Strategic Wrestler</strong> (Backups / Exports / MatScorer). Connect Drive once so MatScorer can create or reuse those folders, or switch Source to Local.</p>`;
           if (hint) hint.textContent = "No matching files";
           return;
         }
@@ -4713,29 +4856,42 @@ async function resolveMatScorerDir(handle) {
         }
         if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) markAppInstalled();
         await loadStoreAsync();
+        requestPersistentStorage();
         if (typeof restoreExportDirHandle === "function") {
           const h = await restoreExportDirHandle();
           if (h) {
             exportDirHandle = h;
             const st = document.getElementById("admin-folder-status");
-            if (st) st.innerHTML = `<span style="color:var(--green);">Linked:</span> Strategic Wrestler / ${escHtml(h.name || "MatScorer")} (restored)`;
+            if (st) {
+              const permission = h.queryPermission ? await h.queryPermission({ mode: "readwrite" }) : "granted";
+              st.textContent = "Remembered: " + (h.name || "MatScorer") +
+                (permission === "granted" ? " — access granted" : " — tap Restore remembered folder access");
+            }
           }
         }
-      } catch (e) { console.warn(e); }
+      } catch (e) {
+        console.error("Startup restore failed", e);
+        if (!storageReady) {
+          const gate = document.getElementById("ms-startup-gate");
+          gate.textContent = "Saved data could not be loaded. No automatic writes will run. Close and retry; do not clear site data. Error: " + e.message;
+          return;
+        }
+      }
+      document.getElementById("ms-startup-gate").remove();
       try { updateAdminUI(); } catch (e) {}
       try { updateInstallButtonVisibility(); } catch (e) {}
-      try { renderHome(); } catch (e) {}
+      try { renderHome(); recoverActiveDraft(); } catch (e) { console.error(e); }
     })();
     // Periodic persist (Android PWA reliability)
     try {
       window._msAutoSave = setInterval(function () {
-        try { if (store && ((store.events && store.events.length) || (store.roster && store.roster.length))) saveStore(); } catch (e) {}
+        try { if (storageReady) { saveActiveDraft(); saveStore(); } } catch (e) {}
       }, 15000);
     } catch (e) {}
-    window.addEventListener("pagehide", function () { try { saveStore(); } catch (e) {} });
-    window.addEventListener("beforeunload", function () { try { saveStore(); } catch (e) {} });
+    window.addEventListener("pagehide", function () { try { saveActiveDraft(); saveStore(); } catch (e) {} });
+    window.addEventListener("beforeunload", function () { try { saveActiveDraft(); saveStore(); } catch (e) {} });
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "hidden") { try { saveStore(); } catch (e) {} }
+      if (document.visibilityState === "hidden") { try { saveActiveDraft(); saveStore(); } catch (e) {} }
     });
   </script>
 </body>
