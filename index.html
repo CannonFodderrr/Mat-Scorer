@@ -1249,7 +1249,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v1.7-auto-restore";
+    const MAT_SCORER_BUILD = "v1.8-idb-android";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -1449,7 +1449,9 @@
       try {
         await new Promise(function (resolve, reject) {
           var tx = db.transaction("kv", "readwrite");
-          tx.objectStore("kv").put(value, "store");
+          var os = tx.objectStore("kv");
+          os.put(value, "store");
+          os.put(value, "store-backup");
           tx.oncomplete = function () { resolve(); };
           tx.onerror = tx.onabort = function () { reject(tx.error || new Error("Database write aborted")); };
         });
@@ -1463,9 +1465,9 @@
         return await new Promise(function (resolve, reject) {
           var tx = db.transaction("kv", "readonly");
           var q = tx.objectStore("kv").get("store");
-          var value;
-          q.onsuccess = function () { value = q.result; };
-          tx.oncomplete = function () { resolve(value); };
+          // Resolve on onsuccess — some Android WebViews never fire tx.oncomplete for readonly txns
+          q.onsuccess = function () { resolve(q.result); };
+          q.onerror = function () { reject(q.error || new Error("Database read aborted")); };
           tx.onerror = tx.onabort = function () { reject(tx.error || new Error("Database read aborted")); };
         });
       } finally {
@@ -1565,8 +1567,6 @@
       storageQueue = storageQueue.catch(function () {}).then(async function () {
         try {
           await writeStoreStrict(snapshot);
-          // Also stash under a second key for redundancy
-          try { await idbSet("store-backup", snapshot); } catch (e) {}
           idbOk = true;
           storageLastError = "";
           try {
@@ -4720,10 +4720,57 @@ async function resolveMatScorerDir(handle) {
         try { if (storageReady) { saveActiveDraft(); saveStore(); } } catch (e) {}
       }, 15000);
     } catch (e) {}
-    window.addEventListener("pagehide", function () { try { if (window.__msStoreHydrated) { saveActiveDraft(); saveStore(); } } catch (e) {} });
-    window.addEventListener("beforeunload", function () { try { if (window.__msStoreHydrated) { saveActiveDraft(); saveStore(); } } catch (e) {} });
+    function forceSyncIdbSave() {
+      try {
+        if (!window.__msStoreHydrated) return;
+        if (typeof normalizeStoreShape === "function") normalizeStoreShape();
+        var payload = JSON.stringify(store);
+        var snapshot = JSON.parse(payload);
+        try {
+          localStorage.setItem(STORE_KEY, payload);
+          localStorage.setItem("sw-matscorer-v1", payload);
+        } catch (e) {}
+        var req = indexedDB.open("sw-matscorer-data", 2);
+        req.onsuccess = function () {
+          try {
+            var db = req.result;
+            var tx = db.transaction("kv", "readwrite");
+            var os = tx.objectStore("kv");
+            os.put(snapshot, "store");
+            os.put(snapshot, "store-backup");
+            tx.oncomplete = function () { try { db.close(); } catch (e) {} };
+          } catch (e) {}
+        };
+      } catch (e) {}
+    }
+    window.addEventListener("pagehide", function () {
+      try {
+        if (window.__msStoreHydrated) {
+          saveActiveDraft();
+          forceSyncIdbSave();
+          saveStore();
+        }
+      } catch (e) {}
+    });
+    window.addEventListener("beforeunload", function () {
+      try {
+        if (window.__msStoreHydrated) {
+          saveActiveDraft();
+          forceSyncIdbSave();
+          saveStore();
+        }
+      } catch (e) {}
+    });
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "hidden") { try { if (window.__msStoreHydrated) { saveActiveDraft(); saveStore(); } } catch (e) {} }
+      if (document.visibilityState === "hidden") {
+        try {
+          if (window.__msStoreHydrated) {
+            saveActiveDraft();
+            forceSyncIdbSave();
+            saveStore();
+          }
+        } catch (e) {}
+      }
     });
   </script>
 </body>

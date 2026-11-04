@@ -1,6 +1,6 @@
 /* MatScorer persistence release. Application records remain in IndexedDB. */
 const CACHE_PREFIX = "matscorer-offline-";
-const CACHE_NAME = CACHE_PREFIX + "v43-auto-restore";
+const CACHE_NAME = CACHE_PREFIX + "v44-idb-android";
 const SHELL = ["./", "./index.html", "./MatScorer.html", "./matscorer-icon-180.png", "./matscorer-icon-192.png", "./matscorer-icon-512.png", "./matscorer-icon-512-maskable.png"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.all(
