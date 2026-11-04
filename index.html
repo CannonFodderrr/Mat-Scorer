@@ -1238,7 +1238,7 @@
       
       
     </div>
-    <p class="muted" style="margin:4px 2px 12px;font-size:11px;">Roster, events, scores, and admin settings save automatically on this device (fast local storage) and reload when you reopen MatScorer.</p>
+    <p class="muted" style="margin:4px 2px 12px;font-size:11px;">Roster, events, scores, and admin settings save automatically on this device (IndexedDB) and reload when you reopen MatScorer.</p>
     <!-- Device data auto-saves to IndexedDB and reloads on open. -->
     <p id="ms-storage-status" class="muted" style="display:none;" aria-hidden="true"></p>
     <p id="ms-persistence-detail" class="muted" style="display:none;" aria-hidden="true"></p>
@@ -1266,7 +1266,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v2.1-fast-local";
+    const MAT_SCORER_BUILD = "v2.0-ls-first";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -1605,26 +1605,29 @@
     }
     /** Sync bootstrap from localStorage only (before IDB is ready). */
     function loadStore() {
-      // FAST PATH (SW-style): synchronous localStorage only. Never touches IndexedDB.
       try {
-        var data = null;
         if (window.__msBootStore && typeof window.__msBootStore === "object") {
-          data = window.__msBootStore;
+          applyStoreData(window.__msBootStore);
+          console.info("[MatScorer] bootStore roster=", store.roster.length, "events=", store.events.length);
         } else {
-          var raw = localStorage.getItem("sw-matscorer-v1") ||
-                    localStorage.getItem(STORE_KEY) ||
-                    localStorage.getItem("sw-matside-v1");
-          if (raw) data = JSON.parse(raw);
+          var raw = localStorage.getItem("sw-matscorer-v1") || localStorage.getItem(STORE_KEY) || localStorage.getItem("sw-matside-v1");
+          if (raw) {
+            applyStoreData(JSON.parse(raw));
+            console.info("[MatScorer] sync loadStore roster=", store.roster.length, "events=", store.events.length);
+          }
         }
-        if (data) applyStoreData(data);
       } catch (e) { console.warn("loadStore", e); }
       normalizeStoreShape();
-      window.__msStoreHydrated = true;
-      storageReady = true;
       try { applyShowZoomButtons(); } catch (e) {}
-      try { updateHomeDataBadge(); } catch (e) {}
+      // If we already have data from localStorage, allow saves immediately
+      try {
+        if ((store.roster && store.roster.length) || (store.events && store.events.length)) {
+          window.__msStoreHydrated = true;
+          storageReady = true;
+        }
+      } catch (e) {}
     }
-    let storageReady = true;
+    let storageReady = true; // saves never blocked
     let storageQueue = Promise.resolve();
     let storageLastError = "";
     let matchFinalizing = false;
@@ -1635,61 +1638,69 @@
         el.style.color = failed ? "#ffb4a8" : "#b8e0c8";
       }
     }
-    /** Build a JSON-safe snapshot of the in-memory store. */
-    function snapshotStore() {
-      normalizeStoreShape();
-      store.gapiClientId = HARDCODED_CLIENT_ID;
-      store._savedAt = Math.max(Date.now(), (Number(store._savedAt) || 0) + 1);
-      store._schemaVersion = 4;
-      try {
-        if (exportDirHandle && exportDirHandle.name) {
-          store.localFolderName = exportDirHandle.name;
-          store.exportPath = store.exportPath || ("Strategic Wrestler / " + exportDirHandle.name);
-        }
-      } catch (e) {}
-      var payload = JSON.stringify(store);
-      return { payload: payload, snapshot: JSON.parse(payload) };
-    }
     /**
-     * PRIMARY save = localStorage (sync, fast).
-     * SECONDARY = IndexedDB in the background (best-effort).
+     * Primary persistence: IndexedDB key "store".
+     * Mirror copy in localStorage for fast startup.
      */
     function saveStore() {
-      var payload, snapshot, lsOk = false;
-      try {
-        var snap = snapshotStore();
-        payload = snap.payload;
-        snapshot = snap.snapshot;
-        localStorage.setItem(STORE_KEY, payload);
-        try { localStorage.setItem("sw-matscorer-v1", payload); } catch (e2) {}
-        lsOk = true;
-        window.__msBootStore = snapshot;
-      } catch (error) {
-        console.error("localStorage save failed", error);
-        try { storageStatus("localStorage save failed: " + error.message, true); } catch (e) {}
+      var snapshot, payload, idbOk = false, lsOk = false;
+      if (!window.__msStoreHydrated) {
+        console.warn("[MatScorer] saveStore skipped — store not hydrated yet");
         return Promise.resolve(false);
       }
       try {
-        storageStatus("Saved on this device · " + new Date(snapshot._savedAt).toLocaleTimeString(), false);
-      } catch (e) {}
-      // Background IDB — never block UI or close handlers on this finishing
+        normalizeStoreShape();
+        store.gapiClientId = HARDCODED_CLIENT_ID;
+        store._savedAt = Math.max(Date.now(), (Number(store._savedAt) || 0) + 1);
+        store._schemaVersion = 3;
+        try {
+          if (exportDirHandle && exportDirHandle.name) {
+            store.localFolderName = exportDirHandle.name;
+            store.exportPath = store.exportPath || ("Strategic Wrestler / " + exportDirHandle.name);
+          }
+        } catch (e) {}
+        payload = JSON.stringify(store);
+        snapshot = JSON.parse(payload);
+        try {
+          localStorage.setItem(STORE_KEY, payload);
+          try { localStorage.setItem("sw-matscorer-v1", payload); } catch (e2) {}
+          lsOk = true;
+        } catch (error) {
+          console.warn("localStorage mirror failed", error);
+        }
+      } catch (error) {
+        console.error("saveStore snapshot", error);
+        try { storageStatus("Save failed: " + error.message, true); } catch (e) {}
+        return Promise.resolve(false);
+      }
       storageQueue = storageQueue.catch(function () {}).then(async function () {
         try {
           await writeStoreStrict(snapshot);
+          idbOk = true;
           storageLastError = "";
+          try {
+            storageStatus(
+              "Saved on this device · " + new Date(snapshot._savedAt).toLocaleTimeString() +
+              (lsOk ? "" : " (no localStorage)"),
+              false
+            );
+          } catch (e) {}
           return true;
         } catch (error) {
-          console.warn("IndexedDB background save", error);
+          console.error("IndexedDB save failed", error);
           storageLastError = error && error.message ? error.message : String(error);
+          try {
+            storageStatus(
+              lsOk ? "Saved in localStorage only (IndexedDB failed)" : "NOT SAVED",
+              !lsOk
+            );
+          } catch (e) {}
           return lsOk;
         }
       });
-      return Promise.resolve(lsOk);
+      return storageQueue;
     }
-    /**
-     * Background only: if IndexedDB has newer/richer data than localStorage, merge it.
-     * Safe to call after home is already showing.
-     */
+    /** Load: IndexedDB primary, then localStorage fallback. */
     async function loadStoreAsync(opts) {
       opts = opts || {};
       function countData(c) {
@@ -1697,30 +1708,64 @@
         return (Array.isArray(c.events) ? c.events.length : 0) +
                (Array.isArray(c.roster) ? c.roster.length : 0);
       }
-      var localCount = countData(store);
-      var fromIdb = null;
-      try {
-        fromIdb = await readStoreStrict();
-      } catch (e) {
-        console.warn("[MatScorer] background IDB read", e);
+      var best = null, bestScore = -1, bestSrc = "";
+      function consider(src, data) {
+        if (!data || typeof data !== "object") return;
+        var score = countData(data) * 1e15 + (Number(data._savedAt) || 0);
+        if (score > bestScore) { bestScore = score; best = data; bestSrc = src; }
       }
-      if (fromIdb && typeof fromIdb === "object" && countData(fromIdb) > localCount) {
-        applyStoreData(fromIdb);
+      // Always prefer localStorage first (sync, never hangs)
+      try {
+        ["sw-matscorer-v1", STORE_KEY, "sw-matside-v1"].forEach(function (key) {
+          try {
+            var raw = localStorage.getItem(key);
+            if (raw) consider("ls:" + key, JSON.parse(raw));
+          } catch (e) {}
+        });
+      } catch (e) {}
+      // Then IDB (max 2 attempts — each read has its own 2s timeout)
+      var attempts = opts.attempts != null ? Math.min(opts.attempts, 3) : 2;
+      for (var attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          var fromIdb = await readStoreStrict();
+          if (fromIdb && typeof fromIdb === "object") {
+            consider("idb", fromIdb);
+            if (countData(fromIdb) > 0) break;
+          }
+        } catch (e) {
+          console.warn("[MatScorer] IDB attempt " + attempt, e);
+        }
+      }
+      try {
+        var bak = await Promise.race([
+          idbGet("store-backup"),
+          new Promise(function (r) { setTimeout(function () { r(null); }, 1500); })
+        ]);
+        consider("idb-backup", bak);
+      } catch (e) {}
+      if (best) {
+        applyStoreData(best);
+        console.info("[MatScorer] restored from", bestSrc, "roster=", store.roster.length, "events=", store.events.length);
         try {
           var payload = JSON.stringify(store);
           localStorage.setItem(STORE_KEY, payload);
           localStorage.setItem("sw-matscorer-v1", payload);
-          window.__msBootStore = JSON.parse(payload);
         } catch (e) {}
-        if (!opts.silent) {
+        if (countData(store) > 0 && !opts.silent) {
           try {
             toast("Restored " + store.roster.length + " athletes · " + store.events.length + " events");
           } catch (e) {}
         }
-        try { updateAdminUI(); renderHome(); updateHomeDataBadge(); } catch (e) {}
+      } else {
+        console.info("[MatScorer] nothing to restore");
       }
+      normalizeStoreShape();
       window.__msStoreHydrated = true;
       storageReady = true;
+      try { applyShowZoomButtons(); } catch (e) {}
+      try { updateAdminUI(); } catch (e) {}
+      try { renderHome(); } catch (e) {}
+      try { updateHomeDataBadge(); } catch (e) {}
       return countData(store);
     }
 
@@ -4716,8 +4761,9 @@ async function resolveMatScorerDir(handle) {
     }
 
     try { window.__msStoreHydrated = false; } catch (e) {}
-    // FAST OPEN: localStorage only (same idea as SW)
     try { loadStore(); } catch (e) { console.warn("loadStore", e); }
+    try { updateHomeDataBadge(); } catch (e) {}
+    // hydrate + storageReady set in loadStoreAsync
     try {
       var tm = document.getElementById("top-meta");
       if (tm) tm.title = "Build " + MAT_SCORER_BUILD;
@@ -4725,34 +4771,67 @@ async function resolveMatScorerDir(handle) {
     try { initGoogleClient(); } catch (e) { console.warn("initGoogleClient", e); }
     try { renderHome(); } catch (e) { console.warn("renderHome", e); }
     try { updateInstallButtonVisibility(); } catch (e) {}
-    try { updateAdminUI(); } catch (e) {}
-    // Background only — never blocks home
-    setTimeout(function () {
+    (async function () {
       try {
-        if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) {
-          try { markAppInstalled(); } catch (e) {}
-        }
-        loadStoreAsync({ silent: true }).then(function () {
-          try { updateHomeDataBadge(); updateAdminUI(); } catch (e) {}
-        }).catch(function () {});
-        try { requestPersistentStorage(); } catch (e) {}
-        try { recoverActiveDraft(); } catch (e) {}
-        if (typeof restoreExportDirHandle === "function") {
-          restoreExportDirHandle().then(function (h) {
-            if (h) exportDirHandle = h;
-          }).catch(function () {});
-        }
-        idbGet("pwa-installed").then(function (inst) {
+        try { updateHomeDataBadge(); } catch (e) {}
+        try {
+          var inst = await Promise.race([
+            idbGet("pwa-installed"),
+            new Promise(function (r) { setTimeout(function () { r(null); }, 1000); })
+          ]);
           if (inst === "1") {
             window._msInstalled = true;
             try { localStorage.setItem("matscorer-pwa-installed", "1"); } catch (e) {}
-            try { updateInstallButtonVisibility(); } catch (e) {}
           }
-        }).catch(function () {});
-      } catch (e) { console.warn(e); }
-    }, 0);
-
-
+        } catch (e) {}
+        if (typeof isStandaloneDisplay === "function" && isStandaloneDisplay()) {
+          try { markAppInstalled(); } catch (e) {}
+        }
+        // Critical path is localStorage only (already in loadStore). IDB merges in background.
+        try { updateHomeDataBadge(); } catch (e) {}
+        if (!window.__msStoreHydrated) {
+          window.__msStoreHydrated = true;
+          storageReady = true;
+        }
+        // Background IDB merge — must not block home screen
+        setTimeout(function () {
+          loadStoreAsync({ attempts: 2, silent: true }).then(function () {
+            try { updateHomeDataBadge(); updateAdminUI(); renderHome(); } catch (e) {}
+          }).catch(function (e) { console.warn("[MatScorer] background IDB", e); });
+        }, 0);
+        try { requestPersistentStorage(); } catch (e) {}
+        if (typeof restoreExportDirHandle === "function") {
+          setTimeout(function () {
+            restoreExportDirHandle().then(function (h) {
+              if (h) exportDirHandle = h;
+            }).catch(function () {});
+          }, 500);
+        }
+      } catch (e) {
+        console.error("Startup restore failed", e);
+        try { window.__msStoreHydrated = true; storageReady = true; } catch (e2) {}
+        try { updateHomeDataBadge(); } catch (e2) {}
+      }
+      try { updateAdminUI(); } catch (e) {}
+      try { updateInstallButtonVisibility(); } catch (e) {}
+      try { renderHome(); recoverActiveDraft(); } catch (e) { console.error(e); }
+    })();
+    window.addEventListener("load", function () {
+      setTimeout(function () {
+        try {
+          var n = (store.roster || []).length + (store.events || []).length;
+          if (n > 0) return;
+          loadStoreAsync({ attempts: 2, silent: true }).then(function (n2) {
+            if (n2 > 0) {
+              try {
+                toast("Restored " + store.roster.length + " athletes · " + store.events.length + " events");
+              } catch (e) {}
+              try { updateAdminUI(); renderHome(); } catch (e) {}
+            }
+          }).catch(function () {});
+        } catch (e) { console.warn(e); }
+      }, 300);
+    });
 
     // Periodic persist (Android PWA reliability)
     try {
@@ -4761,34 +4840,55 @@ async function resolveMatScorerDir(handle) {
       }, 15000);
     } catch (e) {}
     function forceSyncIdbSave() {
-      // Fast local write first (this is what survives Chromebook/Android kills)
       try {
-        var snap = snapshotStore();
-        localStorage.setItem(STORE_KEY, snap.payload);
-        localStorage.setItem("sw-matscorer-v1", snap.payload);
-        window.__msBootStore = snap.snapshot;
+        if (!window.__msStoreHydrated) return;
+        if (typeof normalizeStoreShape === "function") normalizeStoreShape();
+        var payload = JSON.stringify(store);
+        var snapshot = JSON.parse(payload);
+        try {
+          localStorage.setItem(STORE_KEY, payload);
+          localStorage.setItem("sw-matscorer-v1", payload);
+        } catch (e) {}
         var req = indexedDB.open("sw-matscorer-data", 2);
         req.onsuccess = function () {
           try {
             var db = req.result;
             var tx = db.transaction("kv", "readwrite");
             var os = tx.objectStore("kv");
-            os.put(snap.snapshot, "store");
-            os.put(snap.snapshot, "store-backup");
+            os.put(snapshot, "store");
+            os.put(snapshot, "store-backup");
             tx.oncomplete = function () { try { db.close(); } catch (e) {} };
           } catch (e) {}
         };
       } catch (e) {}
     }
     window.addEventListener("pagehide", function () {
-      try { saveActiveDraft(); saveStore(); forceSyncIdbSave(); } catch (e) {}
+      try {
+        if (window.__msStoreHydrated) {
+          saveActiveDraft();
+          forceSyncIdbSave();
+          saveStore();
+        }
+      } catch (e) {}
     });
     window.addEventListener("beforeunload", function () {
-      try { saveActiveDraft(); saveStore(); forceSyncIdbSave(); } catch (e) {}
+      try {
+        if (window.__msStoreHydrated) {
+          saveActiveDraft();
+          forceSyncIdbSave();
+          saveStore();
+        }
+      } catch (e) {}
     });
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "hidden") {
-        try { saveActiveDraft(); saveStore(); forceSyncIdbSave(); } catch (e) {}
+        try {
+          if (window.__msStoreHydrated) {
+            saveActiveDraft();
+            forceSyncIdbSave();
+            saveStore();
+          }
+        } catch (e) {}
       }
     });
   </script>
