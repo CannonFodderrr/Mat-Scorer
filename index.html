@@ -902,7 +902,7 @@
   <div class="topbar" id="topbar">
     <div class="topbar-left">
       <button type="button" class="hdr-btn hidden" id="back-btn" onclick="goBack()">← Back</button>
-      <div class="brand" id="brand">SW MatScorer</div>
+      <div class="brand" id="brand" style="display:none;"></div>
     </div>
     <div class="topbar-center">
       <div class="page-title" id="page-title"></div>
@@ -916,21 +916,13 @@
   <!-- HOME -->
   <div id="screen-home" class="screen active">
     <div class="home-center">
-      <p id="home-data-badge" class="muted" style="display:block;text-align:center;margin:0;font-size:12px;"></p>
       <script>
       (function () {
-        // Instant, IndexedDB-free: mirror of what SW does with synchronous local reads
+        // Instant, IndexedDB-free boot stash for main script
         try {
           var raw = localStorage.getItem("sw-matscorer-v1") || localStorage.getItem("sw-matside-v1");
-          var el = document.getElementById("home-data-badge");
-          if (!el) return;
-          if (!raw) { el.textContent = ""; return; }
-          var data = JSON.parse(raw);
-          var r = (data && data.roster && data.roster.length) || 0;
-          var e = (data && data.events && data.events.length) || 0;
-          el.textContent = (r || e) ? (r + " athletes · " + e + " events on this device") : "";
-          // Stash for main script so it does not need to wait on IDB
-          window.__msBootStore = data;
+          if (!raw) return;
+          window.__msBootStore = JSON.parse(raw);
         } catch (e) {}
       })();
       </script>
@@ -947,7 +939,6 @@
         <strong>Apple:</strong> Safari → Share → Add to Home Screen.<br/>
         <strong>Android:</strong> Chrome install prompt when available.
       </p>
-      <p class="muted" style="margin-top:6px; font-size:11px;"><strong>Offline:</strong> Open MatScorer <em>once while online</em> so it can cache. After that you can open and score matches offline. Google Drive sync needs internet.</p>
       <div id="ios-install-sheet" style="display:none; position:fixed; inset:0; z-index:99999; background:rgba(0,0,0,0.72); align-items:flex-end; justify-content:center;">
         <div style="background:#1C1F1E; color:#F2F0E6; border:1px solid #C9A227; border-radius:16px 16px 0 0; padding:20px 18px 28px; width:100%; max-width:480px; box-sizing:border-box;">
           <div style="font-weight:800; font-size:16px; margin-bottom:10px; color:#C9A227;">Install MatScorer on iPhone / iPad</div>
@@ -972,7 +963,7 @@
       <div class="card-title">Add Event</div>
       
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-        <label class="muted" style="font-size:12px; font-weight:800;">Weeks</label>
+        <label class="muted" style="font-size:12px; font-weight:800;">Show</label>
         <select id="admin-import-weeks" class="input" style="width:auto; min-width:100px; margin:0; padding:8px 10px;" onchange="setImportWeeks(this.value)">
           <option value="1">1 week</option>
           <option value="2">2 weeks</option>
@@ -982,9 +973,10 @@
         </select>
         <button type="button" class="btn btn-gold-on-gold" id="btn-source-toggle" onclick="toggleImportSource()" style="margin:0; padding:8px 12px;">Source</button>
       </div>
+      <p class="muted" style="margin:-4px 0 10px 0; font-size:11px;">Week filter only controls which events are listed. Import still loads all events from the file.</p>
 
       <div class="btn-row" style="margin-bottom:12px;">
-        <button type="button" class="btn btn-gold" id="ae-import-btn" onclick="triggerLoadEvents()" style="margin-top:0;">Load Events</button>
+        <button type="button" class="btn btn-gold" id="ae-import-btn" onclick="triggerLoadEvents()" style="margin-top:0;">Import Events</button>
         <button type="button" class="btn btn-gold" id="ae-custom-btn" onclick="setAddEventMode('custom')" style="margin-top:0;">Create Custom Event</button>
       </div>
 
@@ -1070,7 +1062,7 @@
     <div class="card">
       <div class="card-title" id="ms-title">Bout Review</div>
       <label>Weight class</label>
-      <input id="ms-weight" class="input" placeholder="e.g. 132" inputmode="numeric" oninput="onSetupWeightChange()" />
+      <select id="ms-weight" class="select" onchange="onSetupWeightChange()"></select>
       <p class="muted" id="ms-bump-hint" style="margin:-4px 0 10px 0; min-height:16px;"></p>
       <label>Our wrestler</label>
       <input id="ms-wrestler" class="input" list="ms-roster-list" placeholder="Unknown — enter name" onchange="onSetupWrestlerChange()" oninput="onSetupWrestlerChange()" />
@@ -1205,8 +1197,6 @@
         <p class="muted" style="margin-bottom:10px;">OAuth Client ID configured for Strategic Wrestler &amp; MatScorer.</p>
         <button type="button" class="btn btn-green" onclick="authGoogleDrive()">Authorize Drive</button>
         <p class="muted" style="margin-top:8px;" id="gdrive-status">Not connected</p>
-        <p class="muted" style="margin-top:8px; font-size:11px; word-break:break-all;" id="gdrive-origin-hint"></p>
-        <p class="muted" style="margin-top:6px; font-size:11px;" id="gdrive-android-hint"></p>
         <div class="card-title" style="margin-top:16px;">Save locations</div>
         <p class="muted" style="margin-bottom:10px;">Default path: <strong>Strategic Wrestler / MatScorer</strong> on Google Drive and locally when linked.</p>
         <label>Google Drive folder name</label>
@@ -1342,6 +1332,10 @@
       else store.importWeeks = parseInt(val, 10) || 1;
       try { saveStore(); } catch (e) {}
       try { updateAdminUI(); } catch (e) {}
+      try {
+        const list = document.getElementById("screen-event-list");
+        if (list && list.classList.contains("active")) openEventList();
+      } catch (e) {}
     }
     function eventDateMs(evOrDate) {
       const d = (evOrDate && typeof evOrDate === "object") ? (evOrDate.date || "") : (evOrDate || "");
@@ -1794,16 +1788,7 @@
       return countData(store);
     }
 
-    function updateHomeDataBadge() {
-      var el = document.getElementById("home-data-badge");
-      if (!el) return;
-      var r = (store.roster || []).length;
-      var e = (store.events || []).length;
-      el.style.display = "block";
-      el.textContent = (r || e)
-        ? (r + " athletes · " + e + " events on this device")
-        : "No roster/events loaded yet";
-    }
+    function updateHomeDataBadge() { /* home badge removed */ }
 
     function renderHome() {
       navStack = ["home"];
@@ -1860,11 +1845,18 @@ function openEventList() {
       pushNav("event-list");
       editingEventId = null;
       const host = document.getElementById("event-grid");
-      const events = (store.events || []).slice().sort((a, b) => {
+      const weeks = getImportWeeks();
+      try {
+        const sel = document.getElementById("admin-import-weeks");
+        if (sel) sel.value = (weeks === "all") ? "all" : String(weeks);
+      } catch (e) {}
+      const allEvents = (store.events || []).slice().sort((a, b) => {
         const da = eventDateMs(a);
         const db = eventDateMs(b);
         return da - db || String(a.name || "").localeCompare(String(b.name || ""));
       });
+      const events = allEvents.filter(ev => boutWithinImportWeeks(ev.date, weeks));
+      const hiddenCount = allEvents.length - events.length;
       host.innerHTML = events.length
         ? events.map(ev => {
             const matches = ev.matches || [];
@@ -1881,7 +1873,10 @@ function openEventList() {
             <div class="ev-scored">${scored} / ${total} matches scored</div>
           </button>`;
           }).join("")
-        : `<p class="muted" style="grid-column:1/-1;">No events yet. Load an event JSON or create one below.</p>`;
+        : `<p class="muted" style="grid-column:1/-1;">${allEvents.length ? "No events in this week range. Choose All or a wider week filter." : "No events yet. Import an event JSON or create one below."}</p>`;
+      if (hiddenCount > 0) {
+        host.innerHTML += `<p class="muted" style="grid-column:1/-1; font-size:11px;">${hiddenCount} older/newer event(s) hidden by week filter.</p>`;
+      }
       updateSourceToggleUI();
       setAddEventMode("import");
       showScreen("screen-event-list");
@@ -1997,9 +1992,8 @@ function openEventList() {
       }
       if (parsed.roster.length) store.roster = parsed.roster.filter(w => !w.quit);
       let added = 0;
-      const weeks = getImportWeeks();
+      // Import every bout; week dropdown is a display filter only
       (parsed.bouts || []).forEach(b => {
-        if (!boutWithinImportWeeks(b.date, weeks)) return;
         if (store.events.some(ev => ev.id === b.id)) return;
         const div = b.division || "Boys"; let r = (parsed.roster || []).filter(w => !w.quit);
         if (div && div !== "Both") r = r.filter(w => w.division === div || !w.division);
@@ -2242,6 +2236,9 @@ function openEventList() {
 
       const std = standardWeightsForDivision(ev.division);
       matches.sort((a, b) => {
+        const aExtra = a.isExtra === true || (a.isStandardSlot === false && !std.includes(String(a.weightClass || "")));
+        const bExtra = b.isExtra === true || (b.isStandardSlot === false && !std.includes(String(b.weightClass || "")));
+        if (!!aExtra !== !!bExtra) return aExtra ? 1 : -1;
         const ai = std.indexOf(String(a.weightClass || "")); const bi = std.indexOf(String(b.weightClass || ""));
         if (ai >= 0 && bi >= 0) return ai - bi; if (ai >= 0) return -1; if (bi >= 0) return 1;
         return (Number(a.weightClass) || 999) - (Number(b.weightClass) || 999);
@@ -2298,6 +2295,45 @@ function openEventList() {
     let setupRosterWeight = "";
     let setupIsExtraAdd = false;
 
+    function populateWeightSelect(ev, selectedWeight) {
+      const sel = document.getElementById("ms-weight");
+      if (!sel) return;
+      const weights = standardWeightsForDivision(ev && ev.division);
+      const cur = selectedWeight != null ? String(selectedWeight) : "";
+      sel.innerHTML = "";
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Select weight";
+      sel.appendChild(blank);
+      weights.forEach(w => {
+        const opt = document.createElement("option");
+        opt.value = String(w);
+        opt.textContent = String(w);
+        sel.appendChild(opt);
+      });
+      if (cur && !weights.map(String).includes(cur)) {
+        const opt = document.createElement("option");
+        opt.value = cur;
+        opt.textContent = cur + " (custom)";
+        sel.appendChild(opt);
+      }
+      if (cur) sel.value = cur;
+      else sel.value = "";
+    }
+
+    function findRosterWrestlerForWeight(weight, levelHint) {
+      const ev = store.events.find(e => e.id === currentEventId);
+      const list = (ev && ev.roster && ev.roster.length) ? ev.roster : (store.roster || []);
+      const w = String(weight || "").trim();
+      if (!w) return null;
+      let candidates = list.filter(r => String(r.weightClass || "") === w && !r.quit);
+      if (levelHint) {
+        const leveled = candidates.filter(r => (r.level || "Varsity") === levelHint);
+        if (leveled.length) candidates = leveled;
+      }
+      return candidates[0] || null;
+    }
+
     function openMatchSetup(matchId) {
       currentMatchId = matchId;
       setupIsExtraAdd = !matchId;
@@ -2318,7 +2354,7 @@ function openEventList() {
       if (matchId) {
         const m = (ev.matches || []).find(x => x.id === matchId);
         if (m) {
-          document.getElementById("ms-weight").value = m.weightClass || "";
+          populateWeightSelect(ev, m.weightClass || "");
           document.getElementById("ms-level").value = m.level || "Varsity";
           document.getElementById("ms-wrestler").value = m.wrestlerName || "";
           document.getElementById("ms-opponent").value = m.opponent || "";
@@ -2329,7 +2365,7 @@ function openEventList() {
           }
         }
       } else {
-        document.getElementById("ms-weight").value = "";
+        populateWeightSelect(ev, "");
         document.getElementById("ms-level").value = ev.level || "Varsity";
         document.getElementById("ms-wrestler").value = "";
         document.getElementById("ms-opponent").value = "";
@@ -2353,7 +2389,9 @@ function openEventList() {
         setupRosterWeight = String(r.weightClass);
         const weightEl = document.getElementById("ms-weight");
         if (setupIsExtraAdd || !(weightEl.value || "").trim()) {
-          weightEl.value = setupRosterWeight;
+          const ev = store.events.find(e => e.id === currentEventId);
+          if (ev) populateWeightSelect(ev, setupRosterWeight);
+          else weightEl.value = setupRosterWeight;
         }
         if (r.level && document.getElementById("ms-level")) {
           const sel = document.getElementById("ms-level");
@@ -2366,7 +2404,25 @@ function openEventList() {
       updateBumpHint();
     }
 
-    function onSetupWeightChange() { updateBumpHint(); }
+    function onSetupWeightChange() {
+      const weightEl = document.getElementById("ms-weight");
+      const boutW = String((weightEl && weightEl.value) || "").trim();
+      const wrestlerEl = document.getElementById("ms-wrestler");
+      const levelEl = document.getElementById("ms-level");
+      const levelHint = levelEl ? levelEl.value : "";
+      if (boutW && (setupIsExtraAdd || !(wrestlerEl.value || "").trim())) {
+        const rw = findRosterWrestlerForWeight(boutW, levelHint);
+        if (rw) {
+          wrestlerEl.value = rw.name || "";
+          setupRosterWeight = String(rw.weightClass || boutW);
+          if (rw.level && levelEl) {
+            const opts = Array.from(levelEl.options).map(o => o.value);
+            if (opts.includes(rw.level)) levelEl.value = rw.level;
+          }
+        }
+      }
+      updateBumpHint();
+    }
 
     function updateBumpHint() {
       const el = document.getElementById("ms-bump-hint");
@@ -3853,7 +3909,14 @@ function openEventList() {
       if (!ev) { afterMatchDone(); return; }
       currentEventId = ev.id; ensureWeightSlots(ev);
       const std = standardWeightsForDivision(ev.division); let matches = (ev.matches || []).slice();
-      matches.sort((a, b) => { const ai = std.indexOf(String(a.weightClass || "")); const bi = std.indexOf(String(b.weightClass || "")); if (ai >= 0 && bi >= 0) return ai - bi; if (ai >= 0) return -1; if (bi >= 0) return 1; return (Number(a.weightClass) || 999) - (Number(b.weightClass) || 999); });
+      matches.sort((a, b) => {
+        const aExtra = a.isExtra === true || (a.isStandardSlot === false && !std.includes(String(a.weightClass || "")));
+        const bExtra = b.isExtra === true || (b.isStandardSlot === false && !std.includes(String(b.weightClass || "")));
+        if (!!aExtra !== !!bExtra) return aExtra ? 1 : -1;
+        const ai = std.indexOf(String(a.weightClass || "")); const bi = std.indexOf(String(b.weightClass || ""));
+        if (ai >= 0 && bi >= 0) return ai - bi; if (ai >= 0) return -1; if (bi >= 0) return 1;
+        return (Number(a.weightClass) || 999) - (Number(b.weightClass) || 999);
+      });
       const curId = lastPackage && lastPackage.matchId; let idx = matches.findIndex(m => m.id === curId); let next = null;
       for (let i = idx + 1; i < matches.length; i++) { if (matches[i].status !== "scored") { next = matches[i]; break; } }
       if (!next) { for (let i = 0; i < matches.length; i++) { if (matches[i].status !== "scored") { next = matches[i]; break; } } }
@@ -4043,7 +4106,6 @@ function openEventList() {
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">Not connected</div>`;
         }
       }
-      try { updateDriveAuthHints(); } catch (e) {}
       const gdFolderSt = document.getElementById("admin-gdrive-folder-status");
       if (gdFolderSt) {
         const name = store.gdriveFolder || "MatScorer";
@@ -4357,58 +4419,6 @@ async function resolveMatScorerDir(handle) {
       if (isDriveConnected()) return uploadPackageToDrive();
       return downloadPackageAll();
     }
-    function getAppOrigin() {
-      try { return window.location.origin || ""; } catch (e) { return ""; }
-    }
-    function isStandalonePwa() {
-      try {
-        return !!((window.matchMedia && (
-          window.matchMedia("(display-mode: standalone)").matches ||
-          window.matchMedia("(display-mode: fullscreen)").matches ||
-          window.matchMedia("(display-mode: minimal-ui)").matches
-        )) || (window.navigator && window.navigator.standalone === true));
-      } catch (e) { return false; }
-    }
-    function isAndroidDevice() {
-      try { return /Android/i.test(navigator.userAgent || ""); } catch (e) { return false; }
-    }
-    function updateDriveAuthHints(extraMsg) {
-      try {
-        const originEl = document.getElementById("gdrive-origin-hint");
-        const androidEl = document.getElementById("gdrive-android-hint");
-        const origin = getAppOrigin();
-        if (originEl) {
-          if (origin && origin !== "null" && origin.indexOf("file:") !== 0) {
-            originEl.innerHTML = "This page origin (must be listed under Authorized JavaScript origins in Google Cloud):<br/><strong>" + escHtml(origin) + "</strong>";
-          } else {
-            originEl.innerHTML = "<strong style=\"color:#f0b4a8;\">Opened from a file:// or invalid origin — Google Drive auth will not work. Host this page on https://</strong>";
-          }
-        }
-        if (androidEl) {
-          if (isAndroidDevice() && isStandalonePwa()) {
-            androidEl.innerHTML = "<strong style=\"color:var(--gold);\">Android installed app:</strong> Google sign-in popups often fail in the home-screen app. Open MatScorer in <strong>Chrome</strong> (browser tab), authorize Drive there, then you can return to the installed app.";
-          } else if (extraMsg) {
-            androidEl.textContent = extraMsg;
-          } else {
-            androidEl.textContent = "";
-          }
-        }
-      } catch (e) {}
-    }
-    function describeDriveAuthError(err) {
-      const msg = (err && (err.message || err.error || err.type || String(err))) || "unknown";
-      const low = String(msg).toLowerCase();
-      if (low.indexOf("popup") >= 0 || low.indexOf("closed") >= 0) {
-        return "Sign-in window was blocked or closed. On Android installed app, open MatScorer in Chrome instead, then Authorize Drive.";
-      }
-      if (low.indexOf("origin") >= 0 || low.indexOf("redirect") >= 0 || low.indexOf("idpiframe") >= 0) {
-        return "Origin not allowed for this OAuth client. Add " + getAppOrigin() + " to Authorized JavaScript origins in Google Cloud Console.";
-      }
-      if (low.indexOf("network") >= 0 || low.indexOf("failed to fetch") >= 0) {
-        return "Network error loading Google sign-in. Check internet / VPN / ad blockers.";
-      }
-      return msg;
-    }
     async function initGoogleClient() {
       if (googleInitPromise) return googleInitPromise;
       googleInitPromise = new Promise((resolve) => {
@@ -4416,8 +4426,7 @@ async function resolveMatScorerDir(handle) {
           window.__gInitTries = (window.__gInitTries || 0) + 1;
           if (window.__gInitTries >= 6) {
             const gd = document.getElementById("gdrive-status");
-            if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded (offline / blocked?) — local scoring still works</div>`;
-            updateDriveAuthHints("Google scripts did not load. Disable ad blockers for this site and stay online.");
+            if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded (offline?) — local scoring still works</div>`;
           }
           googleInitPromise = null;
           if (window.__gInitTries < 40) setTimeout(() => { try { initGoogleClient(); } catch (e) {} }, Math.min(5000, 400 * window.__gInitTries));
@@ -4434,32 +4443,18 @@ async function resolveMatScorerDir(handle) {
               client_id: HARDCODED_CLIENT_ID,
               scope: SCOPES,
               callback: (tokenResponse) => {
-                if (!tokenResponse || tokenResponse.error !== undefined) {
-                  console.error("[MatScorer] Drive token error", tokenResponse);
-                  const detail = describeDriveAuthError(tokenResponse || { error: "unknown" });
-                  toast("Auth failed: " + (tokenResponse && tokenResponse.error ? tokenResponse.error : "unknown"));
-                  const gd = document.getElementById("gdrive-status");
-                  if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Auth failed — ${escHtml(detail)}</div>`;
-                  updateDriveAuthHints(detail);
+                if (tokenResponse.error !== undefined) {
+                  console.error(tokenResponse);
+                  toast("Auth failed: " + (tokenResponse.error || "unknown"));
                   return;
                 }
                 try { gapi.client.setToken(tokenResponse); } catch (e) {}
                 driveFolderId = null;
                 updateAdminUI();
-                updateDriveAuthHints("");
                 toast("Google Drive authorized");
-              },
-              error_callback: (err) => {
-                console.error("[MatScorer] Drive auth error_callback", err);
-                const detail = describeDriveAuthError(err);
-                toast("Auth error: " + detail);
-                const gd = document.getElementById("gdrive-status");
-                if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">${escHtml(detail)}</div>`;
-                updateDriveAuthHints(detail);
               }
             });
             updateAdminUI();
-            updateDriveAuthHints("");
             resolve(true);
             if (pendingDriveAuth) {
               pendingDriveAuth = false;
@@ -4469,8 +4464,7 @@ async function resolveMatScorerDir(handle) {
             console.error(e);
             googleInitPromise = null;
             const gd = document.getElementById("gdrive-status");
-            if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Authorized JavaScript origins for ${escHtml(getAppOrigin())}</div>`;
-            updateDriveAuthHints("Init error. Confirm this origin is authorized: " + getAppOrigin());
+            if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Authorized JavaScript origins</div>`;
             resolve(false);
           }
         });
@@ -4483,21 +4477,6 @@ async function resolveMatScorerDir(handle) {
       if (!store.gdriveFolder) store.gdriveFolder = "MatScorer";
       store.gapiClientId = HARDCODED_CLIENT_ID;
       saveStore();
-      updateDriveAuthHints("");
-
-      const origin = getAppOrigin();
-      if (!origin || origin === "null" || origin.indexOf("file:") === 0) {
-        alert("Google Drive cannot authorize from a local file. Host MatScorer on an https:// site and open it there.");
-        return;
-      }
-
-      // Android installed PWA: popup OAuth frequently fails — warn before attempting
-      if (isAndroidDevice() && isStandalonePwa()) {
-        const cont = confirm(
-          "You are in the installed Android app.\n\nGoogle Drive sign-in often fails here because Android blocks the Google popup in home-screen apps.\n\nBest option:\n1) Open this same MatScorer URL in Chrome (browser)\n2) Admin → Authorize Drive\n3) After it succeeds, you can use the installed app\n\nTap OK to try anyway, or Cancel to stop."
-        );
-        if (!cont) return;
-      }
 
       if (tokenClient) {
         requestDriveToken();
@@ -4520,27 +4499,17 @@ async function resolveMatScorerDir(handle) {
         requestDriveToken();
       } else {
         pendingDriveAuth = false;
-        const tip = "Could not initialize Google client.\n\nOrigin: " + origin +
-          "\n\nCheck:\n• Phone is online\n• No ad blocker blocking Google\n• This origin is listed under Authorized JavaScript origins for the OAuth client\n• Prefer Chrome browser tab over the installed app on Android";
-        alert(tip);
-        updateDriveAuthHints("Google client did not initialize. Verify origin and network.");
+        alert("Could not initialize Google client yet. Wait a second and tap Authorize again. If it keeps failing, check Authorized JavaScript origins for this site URL.");
       }
     }
     function requestDriveToken() {
       try {
-        if (!tokenClient) {
-          toast("Google client not ready");
-          return;
-        }
         const existing = getDriveAccessToken();
-        // Always use consent on first attempt after failure-prone Android sessions
         if (!existing) tokenClient.requestAccessToken({ prompt: "consent" });
         else tokenClient.requestAccessToken({ prompt: "" });
       } catch (e) {
         console.error(e);
-        const detail = describeDriveAuthError(e);
-        toast("Auth error: " + detail);
-        updateDriveAuthHints(detail);
+        toast("Auth error — see console");
       }
     }
     async function ensureDriveFolder(eventFolderName) {
@@ -4807,6 +4776,22 @@ async function resolveMatScorerDir(handle) {
       const isLive = id === "screen-live";
       const prev = document.querySelector(".screen.active");
       const prevId = prev ? prev.id : (document.getElementById("screen-live").classList.contains("active") ? "screen-live" : "");
+      // Unload review video when leaving the review screen
+      if (prevId === "screen-review" && id !== "screen-review") {
+        try {
+          const player = document.getElementById("rev-video-player");
+          if (player) {
+            try { player.pause(); } catch (e) {}
+            try { if (player._url) { URL.revokeObjectURL(player._url); player._url = null; } } catch (e) {}
+            try { player.removeAttribute("src"); player.load(); } catch (e) {}
+            player.style.display = "none";
+          }
+          const speeds = document.getElementById("rev-speed-row");
+          if (speeds) speeds.style.display = "none";
+          const playBtn = document.getElementById("rev-play-video");
+          if (playBtn) playBtn.textContent = "Review Video";
+        } catch (e) {}
+      }
       document.querySelectorAll(".screen").forEach(function (el) { el.classList.toggle("active", el.id === id); });
       const liveEl = document.getElementById("screen-live");
       if (liveEl) liveEl.classList.toggle("active", isLive);
