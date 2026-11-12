@@ -56,16 +56,15 @@
       link.href = url;
       document.head.appendChild(link);
     } catch (e) {}
-    // Service worker: check for updates on every open; never clears IndexedDB/localStorage
+    // Service worker: update on each open; never clears IndexedDB/localStorage
     if ("serviceWorker" in navigator) {
       try {
-        var MS_SW_VER = "v2.2-full";
+        var MS_SW_VER = "v2.3-drive-fix";
         var swUrl = "matscorer-sw11.js?v=" + encodeURIComponent(MS_SW_VER);
         try {
           var base = (window.location.pathname || "/").replace(/[^/]+$/, "");
           swUrl = base + "matscorer-sw11.js?v=" + encodeURIComponent(MS_SW_VER);
         } catch (ePath) {}
-
         function msActivateWaiting(reg) {
           try { if (reg && reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" }); } catch (e) {}
         }
@@ -1314,7 +1313,7 @@
   </div>
 
   <script>
-    const MAT_SCORER_BUILD = "v2.2-full";
+    const MAT_SCORER_BUILD = "v2.3-drive-fix";
     const HARDCODED_CLIENT_ID = "672071758154-n3sa4reeei7aq44ud7ntlk6bnren06j3.apps.googleusercontent.com";
     const STORE_KEY = "sw-matscorer-v1";
     
@@ -2361,10 +2360,8 @@ function openEventList() {
         opt.textContent = cur + " (custom)";
         sel.appendChild(opt);
       }
-      if (cur) sel.value = cur;
-      else sel.value = "";
+      if (cur) sel.value = cur; else sel.value = "";
     }
-
     function findRosterWrestlerForWeight(weight, levelHint) {
       const ev = store.events.find(e => e.id === currentEventId);
       const list = (ev && ev.roster && ev.roster.length) ? ev.roster : (store.roster || []);
@@ -2377,13 +2374,11 @@ function openEventList() {
       }
       return candidates[0] || null;
     }
-
     function openMatchSetup(matchId) {
       currentMatchId = matchId;
       setupIsExtraAdd = !matchId;
       setupRosterWeight = "";
       const ev = store.events.find(e => e.id === currentEventId); if (!ev) return;
-
       document.getElementById("ms-title").textContent = matchId ? "Bout Review" : "Add match";
       const dl = document.getElementById("ms-roster-list"); dl.innerHTML = "";
       (ev.roster || store.roster || []).forEach(w => {
@@ -2394,7 +2389,6 @@ function openEventList() {
       });
       const odl = document.getElementById("ms-opp-list"); odl.innerHTML = "";
       (ev.opponentRoster || []).forEach(o => { const opt = document.createElement("option"); opt.value = o.name || ""; odl.appendChild(opt); });
-
       if (matchId) {
         const m = (ev.matches || []).find(x => x.id === matchId);
         if (m) {
@@ -2447,7 +2441,6 @@ function openEventList() {
       }
       updateBumpHint();
     }
-
     function onSetupWeightChange() {
       const weightEl = document.getElementById("ms-weight");
       const boutW = String((weightEl && weightEl.value) || "").trim();
@@ -4142,6 +4135,7 @@ function openEventList() {
       if (gd) {
         let tokenOk = false;
         try { tokenOk = !!(gapiInited && gapi.client && gapi.client.getToken()); } catch (e) {}
+        if (!tokenOk) { try { tokenOk = !!window.__msDriveToken; } catch (e) {} }
         if (tokenOk) {
           gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Google Drive authorized · default save location</div>`;
         } else if (gapiInited && tokenClient) {
@@ -4432,8 +4426,10 @@ async function resolveMatScorerDir(handle) {
     function getDriveAccessToken() {
       try {
         const t = gapi.client && gapi.client.getToken && gapi.client.getToken();
-        return t && t.access_token ? t.access_token : null;
-      } catch (e) { return null; }
+        if (t && t.access_token) return t.access_token;
+      } catch (e) {}
+      try { if (window.__msDriveToken) return window.__msDriveToken; } catch (e) {}
+      return null;
     }
     function saveGdriveFolderName() {
       const el = document.getElementById("gdrive-folder-name");
@@ -4488,12 +4484,12 @@ async function resolveMatScorerDir(handle) {
           if (origin && origin !== "null" && origin.indexOf("file:") !== 0) {
             originEl.innerHTML = "This page origin (must be listed under Authorized JavaScript origins in Google Cloud):<br/><strong>" + escHtml(origin) + "</strong>";
           } else {
-            originEl.innerHTML = "<strong style=\"color:#f0b4a8;\">Opened from a file:// or invalid origin — Google Drive auth will not work. Host this page on https://</strong>";
+            originEl.innerHTML = "<strong style=\"color:#f0b4a8;\">Opened from a file:// or invalid origin — Google Drive auth will not work. Host on https://</strong>";
           }
         }
         if (androidEl) {
           if (isAndroidDevice() && isStandalonePwa()) {
-            androidEl.innerHTML = "<strong style=\"color:var(--gold);\">Android installed app:</strong> Google sign-in popups often fail in the home-screen app. Open MatScorer in <strong>Chrome</strong> (browser tab), authorize Drive there, then you can return to the installed app.";
+            androidEl.innerHTML = "<strong style=\"color:var(--gold);\">Android installed app:</strong> Open MatScorer in <strong>Chrome</strong> (browser tab) to authorize Drive, then return to the installed app.";
           } else if (extraMsg) {
             androidEl.textContent = extraMsg;
           } else {
@@ -4506,13 +4502,13 @@ async function resolveMatScorerDir(handle) {
       const msg = (err && (err.message || err.error || err.type || String(err))) || "unknown";
       const low = String(msg).toLowerCase();
       if (low.indexOf("popup") >= 0 || low.indexOf("closed") >= 0) {
-        return "Sign-in window was blocked or closed. On Android installed app, open MatScorer in Chrome instead, then Authorize Drive.";
+        return "Sign-in window blocked/closed. On Android installed app, authorize in Chrome browser instead.";
       }
       if (low.indexOf("origin") >= 0 || low.indexOf("redirect") >= 0 || low.indexOf("idpiframe") >= 0) {
-        return "Origin not allowed for this OAuth client. Add " + getAppOrigin() + " to Authorized JavaScript origins in Google Cloud Console.";
+        return "Origin not allowed. Add " + getAppOrigin() + " to Authorized JavaScript origins in Google Cloud.";
       }
       if (low.indexOf("network") >= 0 || low.indexOf("failed to fetch") >= 0) {
-        return "Network error loading Google sign-in. Check internet / VPN / ad blockers.";
+        return "Network error reaching Google. Check internet / ad blockers.";
       }
       return msg;
     }
@@ -4524,7 +4520,7 @@ async function resolveMatScorerDir(handle) {
           if (window.__gInitTries >= 6) {
             const gd = document.getElementById("gdrive-status");
             if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded (offline / blocked?) — local scoring still works</div>`;
-            updateDriveAuthHints("Google scripts did not load. Disable ad blockers for this site and stay online.");
+            updateDriveAuthHints("Google scripts did not load. Disable ad blockers and stay online.");
           }
           googleInitPromise = null;
           if (window.__gInitTries < 40) setTimeout(() => { try { initGoogleClient(); } catch (e) {} }, Math.min(5000, 400 * window.__gInitTries));
@@ -4533,9 +4529,15 @@ async function resolveMatScorerDir(handle) {
         }
         gapi.load("client", async () => {
           try {
-            await gapi.client.init({
-              discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
-            });
+            // Init client; discovery is optional for token auth + raw fetch uploads
+            try {
+              await gapi.client.init({
+                discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
+              });
+            } catch (discErr) {
+              console.warn("[MatScorer] Drive discovery init warning", discErr);
+              try { await gapi.client.init({}); } catch (e2) {}
+            }
             gapiInited = true;
             tokenClient = google.accounts.oauth2.initTokenClient({
               client_id: HARDCODED_CLIENT_ID,
@@ -4551,6 +4553,8 @@ async function resolveMatScorerDir(handle) {
                   return;
                 }
                 try { gapi.client.setToken(tokenResponse); } catch (e) {}
+                // Also stash token for fetch helpers
+                try { window.__msDriveToken = tokenResponse.access_token || null; } catch (e) {}
                 driveFolderId = null;
                 updateAdminUI();
                 updateDriveAuthHints("");
@@ -4577,7 +4581,7 @@ async function resolveMatScorerDir(handle) {
             googleInitPromise = null;
             const gd = document.getElementById("gdrive-status");
             if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Init error — check Authorized JavaScript origins for ${escHtml(getAppOrigin())}</div>`;
-            updateDriveAuthHints("Init error. Confirm this origin is authorized: " + getAppOrigin());
+            updateDriveAuthHints("Init error. Confirm origin is authorized: " + getAppOrigin());
             resolve(false);
           }
         });
@@ -4594,17 +4598,15 @@ async function resolveMatScorerDir(handle) {
 
       const origin = getAppOrigin();
       if (!origin || origin === "null" || origin.indexOf("file:") === 0) {
-        alert("Google Drive cannot authorize from a local file. Host MatScorer on an https:// site and open it there.");
+        alert("Google Drive cannot authorize from a local file. Host MatScorer on https:// and open it there.");
         return;
       }
-
       if (isAndroidDevice() && isStandalonePwa()) {
         const cont = confirm(
-          "You are in the installed Android app.\\n\\nGoogle Drive sign-in often fails here because Android blocks the Google popup in home-screen apps.\\n\\nBest option:\\n1) Open this same MatScorer URL in Chrome (browser)\\n2) Admin → Authorize Drive\\n3) After it succeeds, you can use the installed app\\n\\nTap OK to try anyway, or Cancel to stop."
+          "You are in the installed Android app.\\n\\nGoogle Drive sign-in often fails here.\\n\\nBest option:\\n1) Open this same URL in Chrome (browser)\\n2) Admin → Authorize Drive\\n3) Then return to the installed app\\n\\nOK = try anyway, Cancel = stop."
         );
         if (!cont) return;
       }
-
       if (tokenClient) {
         requestDriveToken();
         return;
@@ -4617,8 +4619,8 @@ async function resolveMatScorerDir(handle) {
         requestDriveToken();
         return;
       }
-      for (let n = 0; n < 10 && !tokenClient; n++) {
-        await new Promise(r => setTimeout(r, 300));
+      for (let n = 0; n < 12 && !tokenClient; n++) {
+        await new Promise(r => setTimeout(r, 400));
         if (!googleInitPromise) await initGoogleClient();
       }
       if (tokenClient) {
@@ -4626,18 +4628,14 @@ async function resolveMatScorerDir(handle) {
         requestDriveToken();
       } else {
         pendingDriveAuth = false;
-        const tip = "Could not initialize Google client.\\n\\nOrigin: " + origin +
-          "\\n\\nCheck:\\n• Phone is online\\n• No ad blocker blocking Google\\n• This origin is listed under Authorized JavaScript origins for the OAuth client\\n• Prefer Chrome browser tab over the installed app on Android";
-        alert(tip);
+        alert("Could not initialize Google client.\\n\\nOrigin: " + origin + "\\n\\nCheck online, ad blockers, and that this origin is in Google Cloud Authorized JavaScript origins.");
         updateDriveAuthHints("Google client did not initialize. Verify origin and network.");
       }
     }
     function requestDriveToken() {
       try {
-        if (!tokenClient) {
-          toast("Google client not ready");
-          return;
-        }
+        if (!tokenClient) { toast("Google client not ready"); return; }
+        // Must be called from a user gesture (button tap) — keep this path synchronous from onclick
         const existing = getDriveAccessToken();
         if (!existing) tokenClient.requestAccessToken({ prompt: "consent" });
         else tokenClient.requestAccessToken({ prompt: "" });
