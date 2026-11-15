@@ -1,9 +1,9 @@
-/* MatScorer SW v2.3-drive-fix
+/* MatScorer SW v2.5-complete
  * - Never touches IndexedDB / localStorage
  * - Never intercepts Google auth/API requests
  * - Network-first for HTML
  */
-var CACHE = "matscorer-shell-v2.3-drive-fix";
+var CACHE = "matscorer-shell-v2.5-complete";
 
 function isGoogleUrl(url) {
   try {
@@ -36,7 +36,6 @@ self.addEventListener("activate", function (event) {
 self.addEventListener("fetch", function (event) {
   var req = event.request;
   if (!req || req.method !== "GET") return;
-  // Critical: let Google auth / APIs bypass the service worker completely
   if (isGoogleUrl(req.url)) return;
 
   var accept = req.headers.get("accept") || "";
