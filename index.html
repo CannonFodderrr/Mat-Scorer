@@ -4726,33 +4726,9 @@ async function resolveMatScorerDir(handle) {
       }
       return msg;
     }
-    async function initGoogleClient() {
-      if (googleInitPromise) return googleInitPromise;
-      googleInitPromise = new Promise((resolve) => {
-        if (typeof gapi === "undefined" || typeof google === "undefined" || !google.accounts) {
-          window.__gInitTries = (window.__gInitTries || 0) + 1;
-          if (window.__gInitTries >= 6) {
-            const gd = document.getElementById("gdrive-status");
-            if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded (offline / blocked?) — local scoring still works</div>`;
-            updateDriveAuthHints("Google scripts did not load. Disable ad blockers and stay online.");
-          }
-          googleInitPromise = null;
-          if (window.__gInitTries < 40) setTimeout(() => { try { initGoogleClient(); } catch (e) {} }, Math.min(5000, 400 * window.__gInitTries));
-          resolve(false);
-          return;
-        }
-        gapi.load("client", async () => {
-          try {
-            try {
-              await gapi.client.init({
-                discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"]
-              });
-            } catch (discErr) {
-              console.warn("[MatScorer] Drive discovery init warning", discErr);
-              try { await gapi.client.init({}); } catch (e2) {}
-            }
-            gapiInited = true;
-            tokenClient = google.accounts.oauth2.initTokenClient({
+    function makeTokenClient() {
+      if (tokenClient) return;
+      tokenClient = google.accounts.oauth2.initTokenClient({
               client_id: HARDCODED_CLIENT_ID,
               scope: SCOPES,
               callback: (tokenResponse) => {
@@ -4781,6 +4757,39 @@ async function resolveMatScorerDir(handle) {
                 updateDriveAuthHints(detail);
               }
             });
+    }
+    async function initGoogleClient() {
+      if (googleInitPromise) return googleInitPromise;
+      if (typeof gapi === "undefined" || typeof google === "undefined" || !google.accounts) {
+        window.__gInitTries = (window.__gInitTries || 0) + 1;
+        if (window.__gInitTries >= 6) {
+          const gd = document.getElementById("gdrive-status");
+          if (gd) gd.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--redDim); border:1px solid var(--red); color:#f0b4a8; font-size:13px;">Google scripts not loaded (offline / blocked?) — local scoring still works</div>`;
+          updateDriveAuthHints("Google scripts did not load. Disable ad blockers and stay online.");
+        }
+        if (window.__gInitTries < 40) setTimeout(() => { try { initGoogleClient(); } catch (e) {} }, Math.min(5000, 400 * window.__gInitTries));
+        return false; // not cached, so later calls retry
+      }
+      googleInitPromise = new Promise((resolve) => {
+        let gapiLoadDone = false;
+        setTimeout(() => {
+          // gapi.load callback never fired: still create the token client (uploads use fetch + token)
+          if (!gapiLoadDone && !tokenClient) { try { makeTokenClient(); } catch (e) { console.error(e); } resolve(!!tokenClient); }
+        }, 6000);
+        gapi.load("client", async () => {
+          gapiLoadDone = true;
+          try {
+            try {
+              await Promise.race([
+                gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] }),
+                new Promise((_, rej) => setTimeout(() => rej(new Error("gapi init timeout")), 5000))
+              ]);
+            } catch (discErr) {
+              console.warn("[MatScorer] Drive discovery init warning", discErr);
+              try { await gapi.client.init({}); } catch (e2) {}
+            }
+            gapiInited = true;
+            makeTokenClient();
             updateAdminUI();
             updateDriveAuthHints("");
             resolve(true);
@@ -4815,7 +4824,7 @@ async function resolveMatScorerDir(handle) {
       }
       if (isAndroidDevice() && isStandalonePwa()) {
         const cont = confirm(
-          "You are in the installed Android app.\\n\\nGoogle Drive sign-in often fails here.\\n\\nBest option:\\n1) Open this same URL in Chrome (browser)\\n2) Admin → Authorize Drive\\n3) Then return to the installed app\\n\\nOK = try anyway, Cancel = stop."
+          "You are in the installed Android app.\n\nGoogle Drive sign-in often fails here.\n\nBest option:\n1) Open this same URL in Chrome (browser)\n2) Admin → Authorize Drive\n3) Then return to the installed app\n\nOK = try anyway, Cancel = stop."
         );
         if (!cont) return;
       }
@@ -4840,7 +4849,7 @@ async function resolveMatScorerDir(handle) {
         requestDriveToken();
       } else {
         pendingDriveAuth = false;
-        alert("Could not initialize Google client.\\n\\nOrigin: " + origin + "\\n\\nCheck online, ad blockers, and that this origin is in Google Cloud Authorized JavaScript origins.");
+        alert("Could not initialize Google client.\n\nOrigin: " + origin + "\n\nCheck online, ad blockers, and that this origin is in Google Cloud Authorized JavaScript origins.");
         updateDriveAuthHints("Google client did not initialize. Verify origin and network.");
       }
     }
