@@ -229,15 +229,15 @@
       border: 1px solid var(--green) !important;
     }
     .btn-green-on-green:active { opacity: 0.85; }
-    #ev-export-btn {
+    #ev-export-btn, #ev-score-ff-btn {
       margin: 0 0 0 auto !important;
       padding: 8px 10px !important;
       font-size: 11px !important;
       font-weight: 800 !important;
       flex: 0 0 auto !important;
-      width: 7.8em !important;
-      min-width: 7.8em !important;
-      max-width: 7.8em !important;
+      width: 11em !important;
+      min-width: 11em !important;
+      max-width: 11em !important;
       white-space: nowrap !important;
       text-align: center !important;
       line-height: 1.2 !important;
@@ -274,6 +274,10 @@
     }
     .event-btn .ev-name { font-size: 13px; font-weight: 800; margin-bottom: 2px; padding-right: 4px; }
     .event-btn .ev-meta { font-size: 10px; color: var(--muted); }
+    .ev-div-badge { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; margin-bottom: 4px; border: 1px solid; }
+    .ev-div-badge.boys { color: #7fb4ff; border-color: #7fb4ff; background: rgba(127,180,255,0.12); }
+    .ev-div-badge.girls { color: #ff9fcf; border-color: #ff9fcf; background: rgba(255,159,207,0.12); }
+    .ev-div-badge.both { color: var(--gold); border-color: var(--gold); background: var(--goldDim); }
     .event-btn .ev-scored { font-size: 11px; color: var(--gold); font-weight: 700; margin-top: 4px; }
     .event-btn:active { transform: scale(0.98); }
     .event-btn-actions {
@@ -305,6 +309,7 @@
 
     .wc-row { display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--gold); color: var(--mat); border: none; border-radius: 8px; margin-bottom: 8px; cursor: pointer; width: 100%; text-align: left; font-family: inherit; }
     .wc-row:active { transform: scale(0.98); opacity: 0.92; }
+    .wc-dup { flex: 0 0 34px; width: 34px !important; height: 34px; margin: 0 !important; padding: 0 !important; font-size: 22px; line-height: 1; border-radius: 8px; }
     .wc-row.pending { background: var(--gold); color: var(--mat); }
     .wc-row.win-us { background: var(--green); color: var(--chalk); }
     .wc-row.win-opp { background: var(--red); color: var(--chalk); }
@@ -1117,9 +1122,12 @@
       </label>
     </div>
     
-    <div class="filter-row-wrap" style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:nowrap; margin-bottom:8px; width:100%;">
+    <div class="filter-row-wrap" style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:8px; width:100%;">
       <div class="filter-row" id="level-filter" style="display:flex; gap:6px; flex:0 1 auto; margin:0; justify-content:flex-start;"></div>
-      <button type="button" class="btn btn-green-on-green" id="ev-export-btn" onclick="exportEventPackages()">Export</button>
+      <div style="display:flex; gap:6px; flex:0 0 auto; align-items:center;">
+        <button type="button" class="btn btn-green-on-green" id="ev-export-btn" onclick="exportEventPackages()">Export</button>
+        <button type="button" class="btn btn-gold-on-gold" id="ev-score-ff-btn" onclick="scoreAllForfeits()">Score Forfeits</button>
+      </div>
     </div>
 
     <div id="wc-list"></div>
@@ -1300,6 +1308,13 @@
             <span class="muted" style="display:block;margin-top:4px;font-size:12px;">Off by default. Pinch-to-zoom on the live camera always works on phones and tablets.</span>
           </span>
         </label>
+        <label class="check-row" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0 0 14px 0;">
+          <input type="checkbox" id="admin-fast-shutter" style="margin-top:3px;width:18px;height:18px;flex-shrink:0;" onchange="setFastShutter(this.checked)" />
+          <span>
+            <strong style="color:var(--chalk);">Fast shutter (~1/500 s)</strong>
+            <span class="muted" style="display:block;margin-top:4px;font-size:12px;">Reduces motion blur if your phone allows manual exposure. Needs good gym lighting or video will look dark. Does nothing on phones that don't support it. Takes effect next time the camera opens.</span>
+          </span>
+        </label>
         <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:var(--gold);margin-bottom:8px;">Team roster</div>
         <p class="muted" style="margin-bottom:10px;">Import a Strategic Wrestler season export from device or Google Drive.</p>
         <div class="btn-row" style="margin-bottom:8px;">
@@ -1381,6 +1396,7 @@
     let cameraZoomMode = "none"; // "track" | "css" | "none"
     let cameraPinchStartDist = 0;
     let cameraPinchStartZoom = 1;
+    const REC_BITS_PER_SECOND = 6000000; // ~6 Mbps for 1080p action (was 2.5)
     let mediaRecorder = null;
     let recordedChunks = [];
     let recording = false;
@@ -1453,6 +1469,7 @@
       document.body.classList.toggle("show-zoom-buttons", on);
       const cb = document.getElementById("admin-show-zoom-btns");
       if (cb) cb.checked = on;
+      const fsCb = document.getElementById("admin-fast-shutter"); if (fsCb) fsCb.checked = !!(store && store.fastShutter);
       try { updateZoomUI(); } catch (e) {}
     }
     function toast(msg) {
@@ -1676,6 +1693,7 @@
         store = { teamName: "", roster: [], events: [], exportPath: "", gdrivePath: "", gdriveFolder: "MatScorer", demoMode: false, seasonMeta: null, gapiClientId: HARDCODED_CLIENT_ID, weightClasses: null, showZoomButtons: false };
       }
       if (typeof store.showZoomButtons !== "boolean") store.showZoomButtons = false;
+      if (typeof store.fastShutter !== "boolean") store.fastShutter = false;
       if (!Array.isArray(store.events)) store.events = [];
       if (!Array.isArray(store.roster)) store.roster = [];
       if (store.gdriveFolder === "MatSide") store.gdriveFolder = "MatScorer";
@@ -1927,6 +1945,8 @@
       toast("Exported " + nJson + " JSON, " + nVid + " video(s) for SW import");
     }
 
+function evDivisionKey(ev) { const d = String((ev && ev.division) || "Boys"); return d === "Girls" ? "girls" : (d === "Both" ? "both" : "boys"); }
+    function evDivisionLabel(ev) { const k = evDivisionKey(ev); return k === "girls" ? "Girls" : (k === "both" ? "Boys &amp; Girls" : "Boys"); }
 function openEventList() {
       pushNav("event-list");
       editingEventId = null;
@@ -1954,6 +1974,7 @@ function openEventList() {
               <span class="ev-act ev-edit" title="Edit event" role="button" onclick="event.stopPropagation(); editEvent('${ev.id}')">✎</span>
               <span class="ev-act ev-del" title="Delete event" role="button" onclick="event.stopPropagation(); deleteEvent('${ev.id}')">✕</span>
             </div>
+            <div class="ev-div-badge ${evDivisionKey(ev)}">${evDivisionLabel(ev)}</div>
             <div class="ev-name">${escHtml(ev.name)}</div>
             <div class="ev-meta">${escHtml(formatDayMonthYear(ev.date))}${ev.type ? " · " + escHtml(ev.type) : ""}</div>
             <div class="ev-scored">${scored} / ${total} matches scored</div>
@@ -2357,17 +2378,48 @@ function openEventList() {
           if (isExtra) tags.push("extra");
           const tagStr = tags.length ? " · " + tags.join(" · ") : "";
           
-          return `<button type="button" class="wc-row ${resultClass}" onclick="onWeightClick('${m.id}')">
+          return `<div class="wc-row ${resultClass}" role="button" tabindex="0" onclick="onWeightClick('${m.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();onWeightClick('${m.id}');}">
+            <button type="button" class="btn btn-green-on-green wc-dup" title="Add another match at this weight" aria-label="Duplicate weight class ${escHtml(m.weightClass || "")}" onclick="event.stopPropagation(); duplicateWeightClass('${m.id}')">+</button>
             <div class="wc-weight">${escHtml(m.weightClass || "—")}</div>
             <div class="wc-info">
               <div class="wc-name">${escHtml(displayName(m.wrestlerName))} vs ${escHtml(displayName(m.opponent))}</div>
               <div class="wc-sub">${escHtml(m.level || "Varsity")}${scored ? " · " + m.ourPoints + "–" + m.oppPoints + teamNote : ""}${tagStr}</div>
             </div>
             ${scoreHtml}
-          </button>`;
+          </div>`;
         }).join("");
       }
       saveStore(); showScreen("screen-event");
+    }
+
+    /** "+" on a weight class card: adds another bout (same weight and home wrestler, opponent "Opponent") at the bottom, like + Add match. */
+    function duplicateWeightClass(matchId) {
+      const ev = store.events.find(e => e.id === currentEventId); if (!ev) return;
+      const arr = ev.matches || [];
+      const src = arr.find(x => x.id === matchId);
+      if (!src) return;
+      // same shape as a match made with "+ Add match": an extra bout, listed at the bottom
+      arr.push({
+        id: uid(),
+        weightClass: src.weightClass,
+        wrestlerId: src.wrestlerId || null,
+        wrestlerName: src.wrestlerName || "",
+        opponent: "Opponent",
+        level: src.level || "Varsity",
+        status: "pending",
+        ourPoints: 0,
+        oppPoints: 0,
+        events: [],
+        package: null,
+        isExtra: true,
+        isStandardSlot: false,
+        isBump: !!src.isBump,
+        rosterWeightClass: src.rosterWeightClass || null
+      });
+      ev.matches = arr;
+      saveStore();
+      renderEvent();
+      toast("Added another " + (src.weightClass || "") + " match");
     }
 
     function onWeightClick(matchId) {
@@ -2535,6 +2587,56 @@ function openEventList() {
       const s = String(n || "").trim();
       if (!s) return true;
       return /^(forfeit|fft|ff|forf\.?)$/i.test(s);
+    }
+
+    function isForfeitOrUnknownName(n) {
+      return isBlankOrForfeitName(n) || /^unknown$/i.test(String(n || "").trim());
+    }
+    /** Scores every unscored bout on the current Weight Classes view where a side is a forfeit / blank / "Unknown". */
+    function scoreAllForfeits() {
+      const ev = store.events.find(e => e.id === currentEventId); if (!ev) return;
+      const pool = (ev.matches || []).filter(m => levelFilter === "All" || m.level === levelFilter || (levelFilter === "Varsity" && !m.level));
+      const todo = [];
+      let nOur = 0, nOpp = 0, nDouble = 0;
+      pool.forEach(m => {
+        if (m.status === "scored") return;
+        if (m.events && m.events.length) return; // already has live-scoring data
+        const us = isForfeitOrUnknownName(m.wrestlerName);
+        const opp = isForfeitOrUnknownName(m.opponent);
+        if (!us && !opp) return;
+        todo.push({ m: m, us: us, opp: opp });
+        if (us && opp) nDouble++; else if (us) nOur++; else nOpp++;
+      });
+      if (!todo.length) { toast("No unscored forfeits or unknown wrestlers found"); return; }
+      const scope = levelFilter === "All" ? "all levels" : levelFilter;
+      const msg = "Score " + todo.length + " forfeit bout" + (todo.length === 1 ? "" : "s") + " (" + scope + ")?\n\n" +
+        "• " + nDouble + " double forfeit" + (nDouble === 1 ? "" : "s") + " (0–0)\n" +
+        "• " + nOur + " we forfeit (opponent +6)\n" +
+        "• " + nOpp + " opponent forfeits (we +6)\n\n" +
+        "Blank or \"Unknown\" names count as forfeits.";
+      if (!confirm(msg)) return;
+      todo.forEach(t => {
+        const m = t.m, us = t.us, opp = t.opp;
+        let kind, detail, dir;
+        if (us && opp) { kind = "double"; detail = "Double Forfeit"; dir = "defense"; }
+        else if (us) { kind = "our"; detail = "We Forfeit"; dir = "offense"; }
+        else { kind = "opp"; detail = "Opp Forfeits"; dir = "defense"; }
+        if (us) m.wrestlerName = "FORFEIT";
+        if (opp) m.opponent = "FORFEIT";
+        m.status = "scored";
+        m.ourPoints = 0;
+        m.oppPoints = 0;
+        m.events = [{
+          id: uid(), period: "P1", category: "Penalty/DQ", move: "Forfeit", direction: dir,
+          outcome: (kind === "our") ? "fail" : "success", points: 0, timestamp: "00:00", detail: detail, source: "mat-scorer-live"
+        }];
+        if (kind === "opp") { m.teamOur = 6; m.teamOpp = 0; }
+        else if (kind === "our") { m.teamOur = 0; m.teamOpp = 6; }
+        else { m.teamOur = 0; m.teamOpp = 0; }
+      });
+      saveStore();
+      renderEvent();
+      toast(todo.length + " forfeit" + (todo.length === 1 ? "" : "s") + " scored");
     }
 
     function quickScoreForfeit() {
@@ -2730,10 +2832,36 @@ function openEventList() {
     } catch (e) {}
 
     // ─── LIVE SCORING ───────────────────────────────────────────────
+    /** Best-effort exposure tuning. Many phones expose no manual exposure to the browser; then this does nothing. */
+    async function tuneCameraExposure(stream) {
+      const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+      if (!track || typeof track.getCapabilities !== "function" || typeof track.applyConstraints !== "function") return;
+      let caps = {};
+      try { caps = track.getCapabilities() || {}; } catch (e) { return; }
+      const modes = Array.isArray(caps.exposureMode) ? caps.exposureMode : [];
+      const wantFast = !!(store && store.fastShutter);
+      try {
+        if (wantFast && modes.indexOf("manual") !== -1 && caps.exposureTime && typeof caps.exposureTime.min === "number") {
+          // exposureTime is in 100µs units in Chrome: 20 = 1/500 s. Clamp to what the camera supports.
+          const t = Math.min(caps.exposureTime.max, Math.max(caps.exposureTime.min, 20));
+          await track.applyConstraints({ advanced: [{ exposureMode: "manual", exposureTime: t }] });
+          console.log("[MatScorer] fast shutter ~1/" + Math.round(10000 / t) + " s");
+          return;
+        }
+        if (modes.indexOf("continuous") !== -1) await track.applyConstraints({ advanced: [{ exposureMode: "continuous" }] });
+      } catch (e) { console.warn("[MatScorer] exposure tuning not applied", e); }
+    }
+    function setFastShutter(on) {
+      store.fastShutter = !!on;
+      try { saveStore(); } catch (e) {}
+      toast(on ? "Fast shutter on — applies next time the camera opens" : "Fast shutter off");
+    }
+
     async function getCameraStream() {
       if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; } try { resetCameraZoom(); } catch (e) {}
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("Camera API not available.");
       const attempts = [
+        { audio: true, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60, min: 24 } } },
         { audio: true, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
         { audio: true, video: { facingMode: "environment" } },
         { audio: true, video: true },
@@ -2744,6 +2872,7 @@ function openEventList() {
       for (const constraints of attempts) {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+          try { tuneCameraExposure(mediaStream); } catch (e) {}
           initCameraZoomFromStream(mediaStream);
           return mediaStream;
         } catch (e) { lastErr = e; }
@@ -2922,7 +3051,7 @@ function openEventList() {
 
         recordedChunks = [];
         const mime = pickMimeType();
-        const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: 2500000 } : { videoBitsPerSecond: 2500000 };
+        const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: REC_BITS_PER_SECOND } : { videoBitsPerSecond: REC_BITS_PER_SECOND };
         try { mediaRecorder = new MediaRecorder(stream, recOpts); } catch (e) { mediaRecorder = new MediaRecorder(stream); }
         mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) recordedChunks.push(ev.data); };
         recording = false; recPaused = false; pausedAccumMs = 0; pauseStartedAt = 0;
@@ -3034,7 +3163,7 @@ function openEventList() {
           recording = true;
         } else if (mediaStream && (!mediaRecorder || mediaRecorder.state === "inactive")) {
           const mime = pickMimeType();
-          const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: 2500000 } : { videoBitsPerSecond: 2500000 };
+          const recOpts = mime ? { mimeType: mime, videoBitsPerSecond: REC_BITS_PER_SECOND } : { videoBitsPerSecond: REC_BITS_PER_SECOND };
           try { mediaRecorder = new MediaRecorder(mediaStream, recOpts); } catch (e) { mediaRecorder = new MediaRecorder(mediaStream); }
           mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) recordedChunks.push(ev.data); };
           mediaRecorder.start(1000);
@@ -4388,11 +4517,34 @@ function openEventList() {
       if (build) build.textContent = "Build " + MAT_SCORER_BUILD;
     }
 
+    let driveSyncCancel = false;
+    function showSyncOverlay(msg) {
+      showSaveOverlay(true, msg);
+      const card = document.querySelector("#match-save-overlay .save-overlay-card");
+      if (card && !document.getElementById("sync-cancel-btn")) {
+        const b = document.createElement("button");
+        b.id = "sync-cancel-btn"; b.type = "button"; b.className = "btn btn-ghost"; b.textContent = "Cancel"; b.style.marginTop = "12px";
+        b.onclick = () => { driveSyncCancel = true; b.textContent = "Cancelling…"; };
+        card.appendChild(b);
+      }
+    }
+    function hideSyncOverlay() {
+      const b = document.getElementById("sync-cancel-btn"); if (b) b.remove();
+      showSaveOverlay(false);
+    }
     async function driveSyncLocalToCloud() {
       if (!isDriveConnected()) return alert("Authorize Google Drive first.");
       if (!exportDirHandle) return alert("Pick a local folder first (Save locations).");
-      showSaveOverlay(true, "Syncing local files to Drive…");
-      let n = 0, fail = 0;
+      driveSyncCancel = false;
+      let n = 0, skipped = 0, fail = 0, authLost = false;
+      const failed = [];
+      let wakeLock = null;
+      const reacquire = async () => {
+        try { if (navigator.wakeLock && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+      };
+      document.addEventListener("visibilitychange", reacquire);
+      await reacquire(); // keeps the tablet awake while syncing
+      showSyncOverlay("Scanning local files…");
       try {
         let msDir = exportDirHandle;
         try {
@@ -4401,28 +4553,55 @@ function openEventList() {
             msDir = await sw.getDirectoryHandle("MatScorer", { create: false });
           }
         } catch (e) {}
+        const items = [];
         async function walk(dir, eventFolderName) {
           for await (const [name, handle] of dir.entries()) {
-            if (handle.kind === "directory") {
-              await walk(handle, name);
-            } else if (handle.kind === "file") {
-              try {
-                const file = await handle.getFile();
-                const blob = await file.arrayBuffer().then(b => new Blob([b], { type: file.type || "application/octet-stream" }));
-                const ok = await uploadToDrive(blob, name, file.type || "application/octet-stream", eventFolderName);
-                if (ok) n++; else fail++;
-              } catch (e) { fail++; console.warn(e); }
-            }
+            if (handle.kind === "directory") await walk(handle, name);
+            else if (handle.kind === "file") items.push({ name: name, handle: handle, eventFolder: eventFolderName, file: null });
           }
         }
         await walk(msDir, null);
-        // Also top-level files in msDir with null event folder
+        for (const it of items) { try { it.file = await it.handle.getFile(); } catch (e) { it.file = null; } }
+        const todo = items.filter(it => it.file).sort((a, b) => a.file.size - b.file.size); // small JSON first, videos last
+        let lastUi = 0;
+        for (let i = 0; i < todo.length; i++) {
+          if (driveSyncCancel) break;
+          const it = todo[i], file = it.file;
+          const label = (i + 1) + "/" + todo.length + " · " + it.name;
+          showSyncOverlay("Checking " + label);
+          try {
+            const parentId = await ensureDriveFolder(it.eventFolder);
+            if (!parentId) throw new Error("Could not open Drive folder");
+            const idx = await getDriveFolderIndex(parentId);
+            const ex = idx.get(it.name);
+            if (ex && ex.size === file.size) { skipped++; continue; } // already on Drive
+            showSyncOverlay("Uploading " + label + (file.size > 4194304 ? " (" + Math.round(file.size / 1048576) + " MB)" : ""));
+            const data = await driveUploadFile(file, it.name, file.type || "application/octet-stream", parentId,
+              (sent) => {
+                const now = Date.now();
+                if (now - lastUi < 400) return;
+                lastUi = now;
+                showSyncOverlay("Uploading " + label + " · " + Math.min(100, Math.round(sent / file.size * 100)) + "%");
+              }, () => driveSyncCancel, ex ? ex.id : null);
+            if (data && data.id) { idx.set(it.name, { id: data.id, size: file.size }); n++; } else throw new Error("Drive returned no file id");
+          } catch (e) {
+            if (e instanceof DriveAuthError) { authLost = true; break; }
+            if (driveSyncCancel) break;
+            fail++; failed.push(it.name); console.warn("Sync failed for", it.name, e);
+          }
+        }
       } catch (e) {
         console.warn(e);
-        alert("Sync error: " + (e.message || e));
+        if (e instanceof DriveAuthError) authLost = true;
+        else alert("Sync error: " + (e.message || e));
+      } finally {
+        document.removeEventListener("visibilitychange", reacquire);
+        try { if (wakeLock) await wakeLock.release(); } catch (e) {}
+        hideSyncOverlay();
       }
-      showSaveOverlay(false);
-      toast("Drive Sync: " + n + " uploaded" + (fail ? (", " + fail + " failed") : ""));
+      toast("Drive Sync: " + n + " uploaded" + (skipped ? ", " + skipped + " already there" : "") + (fail ? ", " + fail + " failed" : "") + (driveSyncCancel ? " (cancelled)" : ""));
+      if (authLost) alert("Google Drive authorization expired during sync.\n\nGo to Admin → Authorize Drive, then run Drive Sync again. Files already uploaded will be skipped.");
+      else if (fail) alert("These files didn't upload:\n" + failed.slice(0, 6).join("\n") + (failed.length > 6 ? "\n…and " + (failed.length - 6) + " more" : "") + "\n\nRun Drive Sync again to retry only those.");
     }
 
     async function ensureLocalMatScorerTree() {
@@ -4743,6 +4922,8 @@ async function resolveMatScorerDir(handle) {
                 }
                 try { gapi.client.setToken(tokenResponse); } catch (e) {}
                 try { window.__msDriveToken = tokenResponse.access_token || null; } catch (e) {}
+                try { window.__msDriveTokenExp = Date.now() + (((tokenResponse.expires_in || 3600) - 90) * 1000); } catch (e) {}
+                try { driveFolderCache.clear(); driveFileIndexCache.clear(); } catch (e) {}
                 driveFolderId = null;
                 updateAdminUI();
                 updateDriveAuthHints("");
@@ -4866,65 +5047,201 @@ async function resolveMatScorerDir(handle) {
         updateDriveAuthHints(detail);
       }
     }
+    // ─── Drive helpers: cached folders, timeouts, token refresh, resumable uploads ───
+    const driveFolderCache = new Map();    // "parentId|name" -> folderId
+    const driveFileIndexCache = new Map(); // folderId -> Map(name -> {id,size})
+    class DriveAuthError extends Error {}
+    function driveSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function refreshDriveTokenSilently(timeoutMs) {
+      return new Promise((resolve) => {
+        if (!tokenClient) return resolve(false);
+        let done = false;
+        const prevCb = tokenClient.callback;
+        const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); try { tokenClient.callback = prevCb; } catch (e) {} resolve(ok); };
+        const timer = setTimeout(() => finish(false), timeoutMs || 20000);
+        tokenClient.callback = (resp) => {
+          if (resp && resp.access_token) {
+            try { gapi.client.setToken(resp); } catch (e) {}
+            try { window.__msDriveToken = resp.access_token; } catch (e) {}
+            window.__msDriveTokenExp = Date.now() + (((resp.expires_in || 3600) - 90) * 1000);
+            finish(true);
+          } else finish(false);
+        };
+        try { tokenClient.requestAccessToken({ prompt: "" }); } catch (e) { finish(false); }
+      });
+    }
+
+    /** fetch() with Drive auth, a hard timeout, and one automatic token refresh on 401. */
+    async function driveFetch(url, opts, timeoutMs) {
+      opts = opts || {};
+      for (let attempt = 0; attempt < 2; attempt++) {
+        let token = getDriveAccessToken();
+        const exp = window.__msDriveTokenExp || 0;
+        if (!token || (exp && Date.now() > exp)) {
+          if (await refreshDriveTokenSilently(20000)) token = getDriveAccessToken();
+        }
+        if (!token) throw new DriveAuthError("Not authorized with Google Drive");
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs || 60000);
+        let res;
+        try {
+          const headers = new Headers(opts.headers || {});
+          headers.set("Authorization", "Bearer " + token);
+          res = await fetch(url, Object.assign({}, opts, { headers: headers, signal: ctrl.signal }));
+        } finally { clearTimeout(timer); }
+        if (res.status === 401) {
+          if (attempt === 0 && await refreshDriveTokenSilently(20000)) continue;
+          throw new DriveAuthError("Google Drive authorization expired");
+        }
+        return res;
+      }
+      throw new DriveAuthError("Google Drive authorization expired");
+    }
+    async function driveErrMsg(res, fallback) {
+      try { const d = await res.json(); return (d && d.error && (d.error.message || d.error)) || fallback; } catch (e) { return fallback; }
+    }
+
     async function ensureDriveFolder(eventFolderName) {
-      const token = getDriveAccessToken();
-      if (!token) return null;
       const rootName = store.gdriveFolder || "MatScorer";
       async function findOrCreate(name, parentId) {
-        const q = parentId
-          ? `name='${name.replace(/'/g, "\\'")}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
-          : `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`;
-        const listUrl = "https://www.googleapis.com/drive/v3/files?pageSize=5&fields=files(id,name)&q=" + encodeURIComponent(q);
-        const listRes = await fetch(listUrl, { headers: { Authorization: "Bearer " + token } });
+        const key = (parentId || "root") + "|" + name;
+        if (driveFolderCache.has(key)) return driveFolderCache.get(key);
+        const esc = String(name).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        const q = "name='" + esc + "' and mimeType='application/vnd.google-apps.folder' and trashed=false and '" + (parentId || "root") + "' in parents";
+        const listRes = await driveFetch("https://www.googleapis.com/drive/v3/files?pageSize=5&fields=files(id,name)&q=" + encodeURIComponent(q), {}, 30000);
+        if (!listRes.ok) throw new Error(await driveErrMsg(listRes, "Drive folder lookup failed (" + listRes.status + ")"));
         const listData = await listRes.json();
-        if (listData.files && listData.files.length) return listData.files[0].id;
-        const meta = { name, mimeType: "application/vnd.google-apps.folder" };
-        if (parentId) meta.parents = [parentId];
-        const createRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
-          method: "POST",
-          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-          body: JSON.stringify(meta)
-        });
-        const created = await createRes.json();
-        return created.id || null;
+        let id = listData.files && listData.files[0] ? listData.files[0].id : null;
+        if (!id) {
+          const meta = { name: name, mimeType: "application/vnd.google-apps.folder" };
+          if (parentId) meta.parents = [parentId];
+          const createRes = await driveFetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(meta)
+          }, 30000);
+          if (!createRes.ok) throw new Error(await driveErrMsg(createRes, "Could not create Drive folder (" + createRes.status + ")"));
+          const created = await createRes.json();
+          id = created.id || null;
+        }
+        if (id) driveFolderCache.set(key, id);
+        return id;
       }
-      // Nest under Strategic Wrestler / {MatScorer}
       const swId = await findOrCreate("Strategic Wrestler", null);
       if (!swId) return null;
-      if (!driveFolderId) driveFolderId = await findOrCreate(rootName, swId);
-      if (!driveFolderId) return null;
-      if (eventFolderName) return await findOrCreate(eventFolderName, driveFolderId);
-      return driveFolderId;
+      const rootId = await findOrCreate(rootName, swId);
+      if (!rootId) return null;
+      driveFolderId = rootId;
+      if (eventFolderName) return await findOrCreate(eventFolderName, rootId);
+      return rootId;
     }
+
+    /** name -> {id,size} for every file already in a Drive folder (so sync can skip what's there). */
+    async function getDriveFolderIndex(folderId) {
+      if (driveFileIndexCache.has(folderId)) return driveFileIndexCache.get(folderId);
+      const idx = new Map();
+      let pageToken = "";
+      do {
+        const q = "'" + folderId + "' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'";
+        const url = "https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id,name,size)&q=" + encodeURIComponent(q) + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : "");
+        const res = await driveFetch(url, {}, 30000);
+        if (!res.ok) throw new Error(await driveErrMsg(res, "Drive folder listing failed (" + res.status + ")"));
+        const data = await res.json();
+        (data.files || []).forEach(f => { idx.set(f.name, { id: f.id, size: Number(f.size || 0) }); });
+        pageToken = data.nextPageToken || "";
+      } while (pageToken);
+      driveFileIndexCache.set(folderId, idx);
+      return idx;
+    }
+
+    function driveXhr(method, url, headers, body, timeoutMs, onProgress) {
+      return new Promise((resolve, reject) => {
+        const x = new XMLHttpRequest();
+        x.open(method, url, true);
+        Object.keys(headers || {}).forEach(k => x.setRequestHeader(k, headers[k]));
+        x.timeout = timeoutMs || 120000;
+        if (onProgress && x.upload) x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+        x.onload = () => resolve(x);
+        x.onerror = () => reject(new Error("network error"));
+        x.ontimeout = () => reject(new Error("timeout"));
+        x.onabort = () => reject(new Error("aborted"));
+        x.send(body || null);
+      });
+    }
+
+    /** Upload one Blob/File. Small files: single multipart request. Large files: resumable, 8 MB chunks with retries.
+     *  existingId updates an existing Drive file instead of creating a duplicate. Returns {id,...}. */
+    async function driveUploadFile(blob, filename, mimeType, parentId, onProgress, shouldCancel, existingId) {
+      const mt = mimeType || blob.type || "application/octet-stream";
+      const metadata = { name: filename, mimeType: mt };
+      if (parentId && !existingId) metadata.parents = [parentId];
+      const total = blob.size;
+      const base = "https://www.googleapis.com/upload/drive/v3/files" + (existingId ? "/" + existingId : "");
+      const method = existingId ? "PATCH" : "POST";
+
+      async function multipart() {
+        const form = new FormData();
+        form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+        form.append("file", blob);
+        const res = await driveFetch(base + "?uploadType=multipart&fields=id,name,size", { method: method, body: form }, 120000);
+        if (!res.ok) throw new Error(await driveErrMsg(res, "Upload failed (" + res.status + ")"));
+        if (onProgress) onProgress(total);
+        return await res.json();
+      }
+      if (total <= 4 * 1024 * 1024) return await multipart();
+
+      const initRes = await driveFetch(base + "?uploadType=resumable&fields=id,name,size", {
+        method: method,
+        headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": mt, "X-Upload-Content-Length": String(total) },
+        body: JSON.stringify(metadata)
+      }, 30000);
+      if (!initRes.ok) throw new Error(await driveErrMsg(initRes, "Could not start upload (" + initRes.status + ")"));
+      const sessionUrl = initRes.headers.get("Location");
+      if (!sessionUrl) return await multipart(); // browser can't read the session URL: fall back to one big request
+
+      const CHUNK = 8 * 1024 * 1024; // multiple of 256 KiB, as Drive requires
+      let offset = 0, fails = 0;
+      while (offset < total) {
+        if (shouldCancel && shouldCancel()) throw new Error("cancelled");
+        const end = Math.min(offset + CHUNK, total);
+        try {
+          const x = await driveXhr("PUT", sessionUrl, { "Content-Range": "bytes " + offset + "-" + (end - 1) + "/" + total },
+            blob.slice(offset, end), 180000, (loaded) => { if (onProgress) onProgress(offset + loaded); });
+          if (x.status === 200 || x.status === 201) { try { return JSON.parse(x.responseText); } catch (e) { return { id: "unknown" }; } }
+          if (x.status === 308) { offset = end; fails = 0; if (onProgress) onProgress(offset); continue; }
+          if (x.status === 429 || x.status >= 500) throw new Error("server " + x.status);
+          const fatal = new Error("Upload rejected (" + x.status + ")"); fatal.fatal = true; throw fatal;
+        } catch (e) {
+          if (e && e.fatal) throw e;
+          fails++;
+          if (fails > 5) throw e;
+          await driveSleep(Math.min(15000, 1000 * Math.pow(2, fails)));
+          try { // ask Drive how much it actually has
+            const st = await driveXhr("PUT", sessionUrl, { "Content-Range": "bytes */" + total }, null, 30000);
+            if (st.status === 200 || st.status === 201) { try { return JSON.parse(st.responseText); } catch (e2) { return { id: "unknown" }; } }
+            if (st.status === 308) {
+              const r = st.getResponseHeader("Range");
+              const m = r && /bytes=0-(\d+)/.exec(r);
+              if (m) offset = Number(m[1]) + 1;
+            }
+          } catch (e3) { /* keep offset and retry the chunk */ }
+        }
+      }
+      throw new Error("Upload ended without confirmation");
+    }
+
     async function uploadToDrive(blob, filename, mimeType, eventFolderName) {
-      const token = getDriveAccessToken();
-      if (!token) {
+      if (!getDriveAccessToken()) {
         alert("Not authorized with Google Drive. Go to Admin → Authorize Drive.");
         return false;
       }
-      const parentId = await ensureDriveFolder(eventFolderName || null);
-      const metadata = {
-        name: filename,
-        mimeType: mimeType || blob.type || "application/octet-stream"
-      };
-      if (parentId) metadata.parents = [parentId];
-      const form = new FormData();
-      form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-      form.append("file", blob);
       try {
-        const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
-          method: "POST",
-          headers: new Headers({ Authorization: "Bearer " + token }),
-          body: form
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          console.error("Drive upload error", data);
-          return false;
-        }
-        return !!data.id;
+        const parentId = await ensureDriveFolder(eventFolderName || null);
+        if (!parentId) return false;
+        const data = await driveUploadFile(blob, filename, mimeType, parentId, null, null, null);
+        return !!(data && data.id);
       } catch (e) {
         console.error("Drive upload failed", e);
+        if (e instanceof DriveAuthError) alert("Google Drive authorization expired. Go to Admin → Authorize Drive, then try again.");
         return false;
       }
     }
@@ -5116,7 +5433,7 @@ async function resolveMatScorerDir(handle) {
 
     // ─── Screen navigation ──────────────────────────────────────────
     const SCREEN_TITLES = {
-      "screen-home": "", "screen-event-list": "Events", "screen-event": "Event",
+      "screen-home": "", "screen-event-list": "Events", "screen-event": "Weight Classes",
       "screen-match-setup": "Match Setup", "screen-done": "Match Saved",
       "screen-review": "Review", "screen-admin": "Admin"
     };
