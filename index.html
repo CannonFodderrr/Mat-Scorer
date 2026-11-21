@@ -1288,6 +1288,13 @@
         <p class="muted" style="margin-top:6px; font-size:11px;" id="gdrive-android-hint"></p>
         <div class="card-title" style="margin-top:16px;">Save locations</div>
         <p class="muted" style="margin-bottom:10px;">Default path: <strong>Strategic Wrestler / MatScorer</strong> on Google Drive and locally when linked.</p>
+        <label class="check-row" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:0 0 14px 0;">
+          <input type="checkbox" id="admin-auto-save-live" checked style="margin-top:3px;width:18px;height:18px;flex-shrink:0;" onchange="setAutoSaveLive(this.checked)" />
+          <span>
+            <strong style="color:var(--chalk);">Live match auto save enable</strong>
+            <span class="muted" style="display:block;margin-top:4px;font-size:12px;">On: when a live match ends, the JSON and video are saved automatically (local folder, and Google Drive if connected). Off: use the Save buttons on the Match Saved page.</span>
+          </span>
+        </label>
         <label>Google Drive folder name</label>
         <input id="gdrive-folder-name" class="input" placeholder="MatScorer" onchange="saveGdriveFolderName()" />
         <p class="muted" style="margin-top:-4px; margin-bottom:10px;" id="admin-gdrive-folder-status">Under Strategic Wrestler / (folder name)</p>
@@ -1470,6 +1477,7 @@
       const cb = document.getElementById("admin-show-zoom-btns");
       if (cb) cb.checked = on;
       const fsCb = document.getElementById("admin-fast-shutter"); if (fsCb) fsCb.checked = !!(store && store.fastShutter);
+      const asCb = document.getElementById("admin-auto-save-live"); if (asCb) asCb.checked = !(store && store.autoSaveLive === false);
       try { updateZoomUI(); } catch (e) {}
     }
     function toast(msg) {
@@ -1702,6 +1710,7 @@
       }
       if (typeof store.showZoomButtons !== "boolean") store.showZoomButtons = false;
       if (typeof store.fastShutter !== "boolean") store.fastShutter = false;
+      if (typeof store.autoSaveLive !== "boolean") store.autoSaveLive = true;
       if (!Array.isArray(store.events)) store.events = [];
       if (!Array.isArray(store.roster)) store.roster = [];
       if (store.gdriveFolder === "MatSide") store.gdriveFolder = "MatScorer";
@@ -2858,6 +2867,11 @@ function openEventList() {
         }
         if (modes.indexOf("continuous") !== -1) await track.applyConstraints({ advanced: [{ exposureMode: "continuous" }] });
       } catch (e) { console.warn("[MatScorer] exposure tuning not applied", e); }
+    }
+    function setAutoSaveLive(on) {
+      store.autoSaveLive = !!on;
+      try { saveStore(); } catch (e) {}
+      toast(on ? "Live match auto save on" : "Live match auto save off — use the Save buttons after each match");
     }
     function setFastShutter(on) {
       store.fastShutter = !!on;
@@ -4202,6 +4216,10 @@ function openEventList() {
 
     async function runMatchSaveWithOverlay() {
       if (!lastPackage) return;
+      if (store && store.autoSaveLive === false) {
+        toast("Auto save is off — tap Save to store the files");
+        return;
+      }
       const pkg = lastPackage;
       const driveOn = (typeof isDriveConnected === "function") && isDriveConnected();
       const localState = await exportDirAccessState(); // none | granted | prompt | denied
@@ -4282,38 +4300,157 @@ function openEventList() {
       if (!lastPackage) return;
       const jsonBlob = new Blob([JSON.stringify(lastPackage.json, null, 2)], { type: "application/json" });
       const wroteJ = await writeBlobToExportDir(jsonBlob, lastPackage.jsonName, lastPackage.evFolder);
-      if (!wroteJ) downloadBlob(jsonBlob, lastPackage.jsonName);
+      if (!wroteJ) { downloadBlob(jsonBlob, lastPackage.jsonName); lastPackage.browserDownloaded = true; }
       if (lastPackage.videoBlob) {
         const wroteV = await writeBlobToExportDir(lastPackage.videoBlob, lastPackage.videoName, lastPackage.evFolder);
-        if (!wroteV) downloadBlob(lastPackage.videoBlob, lastPackage.videoName);
+        if (!wroteV) { downloadBlob(lastPackage.videoBlob, lastPackage.videoName); lastPackage.browserDownloaded = true; }
       } else {
         const row = lastPackage.json && lastPackage.json.packageId ? await getStoredVideo(lastPackage.json.packageId) : null;
-        if (row && row.blob) downloadBlob(row.blob, row.fileName || lastPackage.videoName);
+        if (row && row.blob) { downloadBlob(row.blob, row.fileName || lastPackage.videoName); lastPackage.browserDownloaded = true; }
       }
       toast("Files downloaded");
     }
 
     function afterMatchDone() { lastPackage = null; navStack = ["home", "event-list", "event"]; renderEvent(); }
 
-    function discardSavedMatch() {
-      if (!lastPackage || !lastPackage.eventId || !lastPackage.matchId) return toast("Nothing to discard");
-      if (!confirm("Discard this match score and video package? The bout will return to unscored.")) return;
-      const ev = store.events.find(e => e.id === lastPackage.eventId);
-      if (ev) {
-        const m = (ev.matches || []).find(x => x.id === lastPackage.matchId);
-        if (m) {
-          m.status = "pending";
-          m.ourPoints = 0; m.oppPoints = 0;
-          m.teamOur = 0; m.teamOpp = 0;
-          m.events = []; m.package = null;
-          m.hasVideo = false; m.videoFileName = null; m.videoId = null;
+    async function deleteStoredVideoById(id) {
+      if (!id) return false;
+      let db = null;
+      try {
+        db = await withTimeout(openVideoDb(), 15000, "Opening video storage");
+        await withTimeout(new Promise((resolve, reject) => {
+          const tx = db.transaction(VIDEO_STORE, "readwrite");
+          tx.objectStore(VIDEO_STORE).delete(id);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error("delete failed"));
+          tx.onabort = () => reject(tx.error || new Error("delete aborted"));
+        }), 30000, "Deleting stored video");
+        return true;
+      } catch (e) { console.warn("deleteStoredVideoById", e); return false; }
+      finally { try { if (db) db.close(); } catch (e) {} }
+    }
+
+    /** Removes this match's JSON + video from the linked local folder. Returns "deleted" | "none" | "noaccess". */
+    async function deleteLocalMatchFiles(pkg) {
+      if (!exportDirHandle) return "none";
+      if (!(await ensureExportDirWritable())) return "noaccess";
+      let msDir = exportDirHandle;
+      try {
+        if (exportDirHandle.name !== "MatScorer") {
+          const sw = await exportDirHandle.getDirectoryHandle("Strategic Wrestler", { create: false });
+          msDir = await sw.getDirectoryHandle("MatScorer", { create: false });
+        }
+      } catch (e) { return "none"; }
+      let dir = msDir;
+      if (pkg.evFolder) {
+        try { dir = await msDir.getDirectoryHandle(pkg.evFolder, { create: false }); } catch (e) { return "none"; }
+      }
+      let removed = 0;
+      for (const name of [pkg.jsonName, pkg.videoName]) {
+        if (!name) continue;
+        try { await dir.removeEntry(name); removed++; } catch (e) { if (!e || e.name !== "NotFoundError") throw e; }
+      }
+      if (pkg.evFolder && dir !== msDir) { // tidy up the event folder only if it is now empty
+        try {
+          let empty = true;
+          for await (const _e of dir.entries()) { empty = false; break; }
+          if (empty) await msDir.removeEntry(pkg.evFolder);
+        } catch (e) {}
+      }
+      return removed ? "deleted" : "none";
+    }
+
+    /** Moves this match's JSON + video on Google Drive to the Drive trash. Returns "deleted" | "none" | "offline". */
+    async function trashDriveMatchFiles(pkg) {
+      if (!isDriveConnected()) return "offline";
+      const parentId = await ensureDriveFolder(pkg.evFolder || null, true); // never creates folders
+      if (!parentId) return "none";
+      let trashed = 0;
+      for (const name of [pkg.jsonName, pkg.videoName]) {
+        if (!name) continue;
+        const esc = String(name).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        const q = "name='" + esc + "' and trashed=false and '" + parentId + "' in parents";
+        const res = await driveFetch("https://www.googleapis.com/drive/v3/files?pageSize=10&fields=files(id,name)&q=" + encodeURIComponent(q), {}, 30000);
+        if (!res.ok) throw new Error("Drive lookup failed (" + res.status + ")");
+        const data = await res.json();
+        for (const f of (data.files || [])) {
+          const r2 = await driveFetch("https://www.googleapis.com/drive/v3/files/" + f.id + "?fields=id", {
+            method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trashed: true })
+          }, 30000);
+          if (!r2.ok) throw new Error("Drive delete failed (" + r2.status + ")");
+          trashed++;
         }
       }
-      saveStore();
+      try { driveFileIndexCache.delete(parentId); } catch (e) {}
+      return trashed ? "deleted" : "none";
+    }
+
+    /** Deletes a match's JSON + video from app storage, the linked local folder and Google Drive (trash).
+     *  Pushes human-readable results into removed[] and problems[]. */
+    async function deleteMatchFilesEverywhere(pkg, removed, problems) {
+        // In-app copy of the video (wait for any save still in flight so it can't land after the delete)
+        try { await withTimeout(pkg.videoStorePromise || Promise.resolve(true), 60000, "Video copy"); } catch (e) {}
+        const pid = pkg.json && pkg.json.packageId;
+        if (pid) { if (await deleteStoredVideoById(pid)) removed.push("app storage"); }
+
+        // 3) Linked local folder
+        try {
+          showSaveOverlay(true, "Removing local files…");
+          const r = await withTimeout(deleteLocalMatchFiles(pkg), 60000, "Local delete");
+          if (r === "deleted") removed.push("local folder");
+          else if (r === "noaccess") problems.push("Local folder needs access, so its copy of the files was not removed.");
+        } catch (e) { console.warn(e); problems.push("Could not remove files from the local folder."); }
+
+        // 4) Google Drive
+        try {
+          showSaveOverlay(true, "Removing Drive files…");
+          const r = await withTimeout(trashDriveMatchFiles(pkg), 90000, "Drive delete");
+          if (r === "deleted") removed.push("Google Drive (trash)");
+          else if (r === "offline" && pkg.savedDrive) problems.push("Google Drive isn't connected, so the uploaded files were not removed.");
+          else if (r === "offline" && pkg.driveUnknown) problems.push("Google Drive isn't connected. If this match was uploaded there, those files were not removed.");
+        } catch (e) {
+          console.warn(e);
+          problems.push(e instanceof DriveAuthError ? "Google Drive sign-in expired, so the uploaded files were not removed." : "Could not remove files from Google Drive.");
+        }
+
+        if (pkg.browserDownloaded) problems.push("Files saved as browser downloads can't be removed by the app. Delete them from your Downloads folder.");
+    }
+
+    let discardingSavedMatch = false;
+    async function discardSavedMatch() {
+      if (discardingSavedMatch) return;
+      if (!lastPackage || !lastPackage.eventId || !lastPackage.matchId) return toast("Nothing to discard");
+      if (!confirm("Discard this match?\n\nThe bout returns to unscored, and its JSON and video files are deleted from this app, your linked local folder, and Google Drive (moved to the Drive trash).\n\nThis can't be undone.")) return;
+      discardingSavedMatch = true;
+      const pkg = lastPackage;
+      showSaveOverlay(true, "Discarding match…");
+      const removed = [], problems = [];
+      try {
+        // 1) Reset the bout first, so the score is gone whatever happens to the files
+        const ev = store.events.find(e => e.id === pkg.eventId);
+        if (ev) {
+          const m = (ev.matches || []).find(x => x.id === pkg.matchId);
+          if (m) {
+            m.status = "pending";
+            m.ourPoints = 0; m.oppPoints = 0;
+            m.teamOur = 0; m.teamOpp = 0;
+            m.events = []; m.package = null;
+            m.hasVideo = false; m.videoFileName = null; m.videoId = null;
+            m.packageDownloaded = false; m.videoDownloaded = false;
+          }
+        }
+        saveStore();
+
+        await deleteMatchFilesEverywhere(pkg, removed, problems);
+      } finally {
+        showSaveOverlay(false);
+        discardingSavedMatch = false;
+      }
       lastPackage = null;
-      toast("Match discarded");
+      toast(removed.length ? "Match discarded — files deleted from " + removed.join(", ") : "Match discarded");
       navStack = ["home", "event-list", "event"];
       renderEvent();
+      if (problems.length) setTimeout(() => alert("Match discarded, but:\n\n• " + problems.join("\n• ")), 50);
     }
 
     function goNextMatch() {
@@ -4485,11 +4622,43 @@ function openEventList() {
       }
       toast("No video stored for this match");
     }
-    function discardAndReopenMatch() {
-      if(!confirm("Are you sure you want to discard these scores and reopen the match?")) return;
+    let discardingReopen = false;
+    async function discardAndReopenMatch() {
+      if (discardingReopen) return;
+      if (!reviewMatch) return;
+      if (!confirm("Discard these scores and reopen the match?\n\nIts JSON and video files are also deleted from this app, your linked local folder, and Google Drive (moved to the Drive trash).\n\nThis can't be undone.")) return;
+      discardingReopen = true;
       const { event: ev, match: m } = reviewMatch;
-      m.status = "pending"; m.ourPoints = 0; m.oppPoints = 0; m.teamOur = 0; m.teamOpp = 0; m.events = []; m.package = null;
-      saveStore(); toast("Match reopened"); goBack();
+      // Rebuild the file info for this match from its saved package
+      const pj = m.package || null;
+      const pkg = pj ? {
+        json: pj,
+        jsonName: (pj.naming && pj.naming.matchBase) ? pj.naming.matchBase + ".json" : null,
+        videoName: (pj.video && pj.video.fileName) || m.videoFileName || null,
+        evFolder: (pj.naming && pj.naming.eventFolder) || null,
+        driveUnknown: true,
+        videoStorePromise: Promise.resolve(true)
+      } : null;
+      const videoId = m.videoId || (pj && pj.packageId) || null;
+      const removed = [], problems = [];
+      showSaveOverlay(true, "Discarding match…");
+      try {
+        // Reset the bout first, so the score is gone whatever happens to the files
+        m.status = "pending"; m.ourPoints = 0; m.oppPoints = 0; m.teamOur = 0; m.teamOpp = 0; m.events = []; m.package = null;
+        m.hasVideo = false; m.videoFileName = null; m.videoId = null; m.packageDownloaded = false; m.videoDownloaded = false;
+        saveStore();
+        if (pkg && pkg.jsonName) {
+          await deleteMatchFilesEverywhere(pkg, removed, problems);
+        } else if (videoId) {
+          if (await deleteStoredVideoById(videoId)) removed.push("app storage");
+        }
+      } finally {
+        showSaveOverlay(false);
+        discardingReopen = false;
+      }
+      toast(removed.length ? "Match reopened — files deleted from " + removed.join(", ") : "Match reopened");
+      goBack();
+      if (problems.length) setTimeout(() => alert("Match reopened, but:\n\n• " + problems.join("\n• ")), 50);
     }
 
     // ─── ADMIN & FILESYSTEM ─────────────────────────────────────────
@@ -5184,7 +5353,7 @@ async function resolveMatScorerDir(handle) {
       try { const d = await res.json(); return (d && d.error && (d.error.message || d.error)) || fallback; } catch (e) { return fallback; }
     }
 
-    async function ensureDriveFolder(eventFolderName) {
+    async function ensureDriveFolder(eventFolderName, noCreate) {
       const rootName = store.gdriveFolder || "MatScorer";
       async function findOrCreate(name, parentId) {
         const key = (parentId || "root") + "|" + name;
@@ -5195,6 +5364,7 @@ async function resolveMatScorerDir(handle) {
         if (!listRes.ok) throw new Error(await driveErrMsg(listRes, "Drive folder lookup failed (" + listRes.status + ")"));
         const listData = await listRes.json();
         let id = listData.files && listData.files[0] ? listData.files[0].id : null;
+        if (!id && noCreate) return null;
         if (!id) {
           const meta = { name: name, mimeType: "application/vnd.google-apps.folder" };
           if (parentId) meta.parents = [parentId];
