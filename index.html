@@ -1489,19 +1489,27 @@
         const req = indexedDB.open(VIDEO_DB, 1);
         req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(VIDEO_STORE)) db.createObjectStore(VIDEO_STORE, { keyPath: "id" }); };
         req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+        req.onblocked = () => reject(new Error("video database is blocked by another open tab"));
       });
     }
+    /** Keeps an in-app copy of the video. Always settles (never hangs): resolves true/false. */
     async function saveVideoBlob(id, blob, fileName, meta) {
-      if (!blob) return;
+      if (!blob) return true;
+      let db = null;
       try {
-        const db = await openVideoDb();
-        await new Promise((resolve, reject) => {
+        db = await withTimeout(openVideoDb(), 15000, "Opening video storage");
+        await withTimeout(new Promise((resolve, reject) => {
           const tx = db.transaction(VIDEO_STORE, "readwrite");
           tx.objectStore(VIDEO_STORE).put({ id, fileName: fileName || (id + ".webm"), blob, mimeType: blob.type || "video/webm", size: blob.size, savedAt: new Date().toISOString(), meta: meta || {} });
-          tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
-        });
-        db.close();
-      } catch (e) { console.warn(e); }
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error || new Error("video save failed"));
+          tx.onabort = () => reject(tx.error || new Error("video save aborted (storage full?)"));
+        }), 120000, "Keeping a copy of the video");
+        return true;
+      } catch (e) {
+        console.warn("saveVideoBlob", e);
+        return false;
+      } finally { try { if (db) db.close(); } catch (e) {} }
     }
     async function listStoredVideos() {
       try {
@@ -4023,8 +4031,15 @@ function openEventList() {
         if (mediaRecorder.state === "paused" && typeof mediaRecorder.resume === "function") {
           try { mediaRecorder.resume(); } catch (e) {}
         }
-        mediaRecorder.onstop = () => { const type = mediaRecorder.mimeType || "video/webm"; resolve(recordedChunks.length ? new Blob(recordedChunks, { type }) : null); };
-        try { mediaRecorder.stop(); } catch (e) { resolve(null); }
+        let settled = false;
+        const finish = () => {
+          if (settled) return; settled = true;
+          const type = (mediaRecorder && mediaRecorder.mimeType) || "video/webm";
+          resolve(recordedChunks.length ? new Blob(recordedChunks, { type }) : null);
+        };
+        mediaRecorder.onstop = finish;
+        setTimeout(finish, 8000); // safety net: some browsers never fire onstop
+        try { mediaRecorder.stop(); } catch (e) { finish(); }
       });
     }
 
@@ -4160,11 +4175,13 @@ function openEventList() {
       delete store.activeDraft;
       await saveStore();
 
-      if (videoBlob) {
-        await saveVideoBlob(packageId, videoBlob, json.video.fileName, { wrestlerName: live.wrestlerName, opponent: live.opponent, eventId: live.eventId, matchId: live.matchId });
-      }
+      // Keep an in-app copy of the video in the background; the done screen must never wait on it.
+      const videoStorePromise = videoBlob
+        ? saveVideoBlob(packageId, videoBlob, json.video.fileName, { wrestlerName: live.wrestlerName, opponent: live.opponent, eventId: live.eventId, matchId: live.matchId })
+        : Promise.resolve(true);
 
       lastPackage = {
+        videoStorePromise,
         json, videoBlob, videoName: json.video.fileName, jsonName: base + ".json",
         eventId: live.eventId, matchId: live.matchId, evFolder,
         savedLocal: false, savedDrive: false, downloadedJson: false, downloadedVideo: false
@@ -4176,46 +4193,73 @@ function openEventList() {
       try { await runMatchSaveWithOverlay(); } catch (e) { console.warn(e); }
     }
 
+    function withTimeout(promise, ms, label) {
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error((label || "Operation") + " timed out")), ms);
+        Promise.resolve(promise).then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+      });
+    }
+
     async function runMatchSaveWithOverlay() {
       if (!lastPackage) return;
+      const pkg = lastPackage;
+      const driveOn = (typeof isDriveConnected === "function") && isDriveConnected();
+      const localState = await exportDirAccessState(); // none | granted | prompt | denied
+      // Nothing configured: don't show a spinner at all.
+      if (!driveOn && localState === "none") {
+        toast("Match packaged — set a local folder in Admin, or tap Save local files");
+        return;
+      }
       showSaveOverlay(true, "Saving match files…");
-      let autoMsgs = [];
-      let localJsonSaved = false, localVideoSaved = !lastPackage.videoBlob;
+      const autoMsgs = [];
+      let localTried = false;
       try {
-        const jsonBlob = new Blob([JSON.stringify(lastPackage.json, null, 2)], { type: "application/json" });
-        if (await writeBlobToExportDir(jsonBlob, lastPackage.jsonName, lastPackage.evFolder)) {
-          localJsonSaved = true;
+        // Local folder is the destination whenever one is linked (and the only one if Drive isn't connected).
+        if (localState !== "none") {
+          localTried = true;
+          let jsonOk = false, vidOk = !pkg.videoBlob;
+          try {
+            const jsonBlob = new Blob([JSON.stringify(pkg.json, null, 2)], { type: "application/json" });
+            jsonOk = await withTimeout(writeBlobToExportDir(jsonBlob, pkg.jsonName, pkg.evFolder), 120000, "Saving match file");
+            if (jsonOk && pkg.videoBlob) {
+              showSaveOverlay(true, "Saving video…");
+              vidOk = await withTimeout(writeBlobToExportDir(pkg.videoBlob, pkg.videoName, pkg.evFolder), 600000, "Saving video");
+            }
+          } catch (e) { console.warn("local save", e); }
+          pkg.savedLocal = !!(jsonOk && vidOk);
+          if (pkg.savedLocal) autoMsgs.push("local folder");
         }
-        if (lastPackage.videoBlob) {
-          if (await writeBlobToExportDir(lastPackage.videoBlob, lastPackage.videoName, lastPackage.evFolder)) {
-            localVideoSaved = true;
-          }
+        if (driveOn) {
+          try {
+            showSaveOverlay(true, "Uploading to Google Drive…");
+            await withTimeout(uploadPackageToDrive(true), 1800000, "Drive upload");
+            if (pkg.savedDrive) autoMsgs.push("Google Drive");
+          } catch (e) { console.warn("drive save", e); }
         }
-        lastPackage.savedLocal = localJsonSaved && localVideoSaved;
-        if (lastPackage.savedLocal) autoMsgs.push("local folder");
-      } catch (e) { console.warn(e); }
-      try {
-        if (typeof isDriveConnected === "function" && isDriveConnected()) {
-          await uploadPackageToDrive(true);
-          if (lastPackage.savedDrive) autoMsgs.push("Google Drive");
-        }
-      } catch (e) { console.warn(e); }
-      showSaveOverlay(false);
+      } finally {
+        showSaveOverlay(false); // always clears, whatever happened above
+      }
       try { updateSaveButtons(); } catch (e) {}
       const sum = document.getElementById("done-summary");
       if (sum && autoMsgs.length) {
         sum.innerHTML += `<br/><span style="font-size:11px;color:var(--green);">Saved to ${autoMsgs.join(" + ")}</span>`;
       }
-      if (lastPackage && (lastPackage.savedLocal || lastPackage.savedDrive)) {
-        lastPackage.downloadedJson = true;
-        lastPackage.downloadedVideo = true;
+      if (pkg.savedLocal || pkg.savedDrive) {
+        pkg.downloadedJson = true;
+        pkg.downloadedVideo = true;
         try {
-          const ev = store.events.find(e => e.id === lastPackage.eventId);
-          const m = ev && (ev.matches || []).find(x => x.id === lastPackage.matchId);
+          const ev = store.events.find(e => e.id === pkg.eventId);
+          const m = ev && (ev.matches || []).find(x => x.id === pkg.matchId);
           if (m) { m.packageDownloaded = true; m.videoDownloaded = true; saveStore(); }
         } catch (e) {}
       }
+      // Tell the user about the in-app video copy only if it failed (e.g. device storage full)
+      try {
+        const kept = await withTimeout(pkg.videoStorePromise || Promise.resolve(true), 60000, "Video copy");
+        if (kept === false) toast("Couldn't keep an in-app copy of the video (device storage may be full)");
+      } catch (e) {}
       if (autoMsgs.length) toast("Match saved to " + autoMsgs.join(" + "));
+      else if (localTried) toast("Local folder needs access — tap Save local files");
       else toast("Match packaged — use Save if needed");
     }
 
@@ -4500,6 +4544,10 @@ function openEventList() {
       if (folderSt) {
         if (exportDirHandle && exportDirHandle.name) {
           folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--greenDim); border:1px solid var(--green); color:#b8e0c8; font-weight:800; font-size:13px;">✓ Local folder · ${escHtml(exportDirHandle.name)}</div>`;
+          exportDirAccessState().then(function (st) {
+            if (st === "granted" || !exportDirHandle) return;
+            folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--goldDim); border:1px solid var(--gold); color:var(--gold); font-weight:800; font-size:13px;">Local folder remembered · ${escHtml(exportDirHandle.name)}<br/><span style="font-weight:600;font-size:12px;">Needs one tap of access this session.</span><button type="button" class="btn btn-gold-on-gold" style="margin-top:8px;" onclick="reconnectExportFolder()">Allow access</button></div>`;
+          }).catch(function () {});
         } else {
           folderSt.innerHTML = `<div style="padding:10px 12px; border-radius:8px; background:var(--mat); border:1px solid var(--panelLine); color:var(--muted); font-size:13px;">No local folder this session</div>`;
         }
@@ -4678,8 +4726,7 @@ async function resolveMatScorerDir(handle) {
           await exportDirHandle.requestPermission({ mode: "readwrite" });
         if (permission !== "granted") { toast("Folder remembered; write access not granted"); return; }
         toast("Remembered folder access restored");
-        const st = document.getElementById("admin-folder-status");
-        if (st) st.textContent = "Linked: " + exportDirHandle.name + " — access granted";
+        try { updateAdminUI(); } catch (e) {}
       } catch (error) { alert("Could not restore folder access: " + error.message); }
     }
     async function pickLocalExportFolder() {
@@ -4706,12 +4753,47 @@ async function resolveMatScorerDir(handle) {
     }
 
 
+    async function exportDirAccessState() {
+      if (!exportDirHandle) return "none";
+      try {
+        if (!exportDirHandle.queryPermission) return "granted";
+        return await exportDirHandle.queryPermission({ mode: "readwrite" }); // granted | prompt | denied
+      } catch (e) { return "denied"; }
+    }
+    /** True if we can write to the linked folder. Tries to (re)request access, which only succeeds right after a tap. */
+    async function ensureExportDirWritable() {
+      let st = await exportDirAccessState();
+      if (st === "granted") return true;
+      if (st === "prompt" && exportDirHandle && exportDirHandle.requestPermission) {
+        try { st = await exportDirHandle.requestPermission({ mode: "readwrite" }); } catch (e) { return false; }
+        return st === "granted";
+      }
+      return false;
+    }
+    let __exportPermArmed = false, __exportPermAsked = false;
+    /** After a restart the browser may need one tap of consent for the remembered folder. Ask on the first tap anywhere in the app. */
+    async function armExportPermissionOnGesture() {
+      if (__exportPermArmed || __exportPermAsked || !exportDirHandle) return;
+      if ((await exportDirAccessState()) !== "prompt") return;
+      __exportPermArmed = true;
+      const handler = async () => {
+        document.removeEventListener("click", handler, true);
+        document.removeEventListener("keydown", handler, true);
+        __exportPermArmed = false;
+        if (__exportPermAsked) return;
+        __exportPermAsked = true;
+        try {
+          const r = await exportDirHandle.requestPermission({ mode: "readwrite" });
+          if (r === "granted") toast("Local folder ready");
+        } catch (e) {}
+        try { updateAdminUI(); } catch (e) {}
+      };
+      document.addEventListener("click", handler, true);
+      document.addEventListener("keydown", handler, true);
+    }
     async function writeBlobToExportDir(blob, name, eventFolderName) {
       if (!exportDirHandle || !blob) return false;
-      if (exportDirHandle.queryPermission && await exportDirHandle.queryPermission({ mode: "readwrite" }) !== "granted") {
-        toast("Folder remembered — restore folder access in Admin");
-        return false;
-      }
+      if (!(await ensureExportDirWritable())) return false;
       try {
         // exportDirHandle is Strategic Wrestler/MatScorer (or legacy root)
         let msDir = exportDirHandle;
@@ -5792,7 +5874,11 @@ async function resolveMatScorerDir(handle) {
         if (typeof restoreExportDirHandle === "function") {
           setTimeout(function () {
             restoreExportDirHandle().then(function (h) {
-              if (h) exportDirHandle = h;
+              if (h) {
+                exportDirHandle = h;
+                try { updateAdminUI(); } catch (e) {}
+                try { armExportPermissionOnGesture(); } catch (e) {}
+              }
             }).catch(function () {});
           }, 500);
         }
